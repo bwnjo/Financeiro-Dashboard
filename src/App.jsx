@@ -1,1160 +1,1060 @@
-import { useState, useEffect, useRef } from "react";
+// ─── Finance Dashboard — Complete Rewrite ─────────────────────────────────────
+import { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, ArrowLeftRight, CreditCard, Receipt,
-  TrendingUp, Bot, Settings, LogOut, Plus, Filter,
-  ChevronDown, Download, Upload, Eye, EyeOff, Trash2,
-  CheckCircle2, Clock, Target, Wallet, Bell, Search,
-  Send, X, Edit2, Save, BarChart2, PiggyBank, Shield
+  TrendingUp, Bot, Settings, LogOut, Plus,
+  ChevronDown, ChevronLeft, Download, Upload,
+  Eye, EyeOff, Trash2, CheckCircle2, Clock, Wallet,
+  Bell, Search, Send, X, Edit2, Save, FileText, Calendar,
+  AlertCircle, RefreshCw, Percent, Camera, Shield, Palette
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
+  PieChart, Pie, Cell,
 } from "recharts";
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+// ─── Storage helpers ──────────────────────────────────────────────────────────
 const LS = {
   get: (k, fb) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch { return fb; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
+const pkey = (pid, key) => `fin_${pid}_${key}`;
 
-const fmt = (n) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
-const fmtDate = (d) => new Date(d).toLocaleDateString("pt-BR", { weekday: "short", hour: "2-digit", minute: "2-digit" });
+// ─── Formatting ───────────────────────────────────────────────────────────────
+const fmt = (n) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(n) || 0);
+const fmtDate = (d) => { try { return new Date(d).toLocaleDateString("pt-BR"); } catch { return "—"; } };
+const fmtDateTime = (d) => { try { return new Date(d).toLocaleDateString("pt-BR", { weekday: "short", hour: "2-digit", minute: "2-digit" }); } catch { return "—"; } };
+const daysUntil = (d) => Math.ceil((new Date(d) - new Date()) / 86400000);
 
-const SEED_TRANSACTIONS = [
-  { id: 1, name: "Dribbble", amount: -12, category: "Assinaturas", date: new Date().toISOString() },
-  { id: 2, name: "Amazon", amount: -49.99, category: "Compras", date: new Date(Date.now() - 36e5).toISOString() },
-  { id: 3, name: "Dianne Russell", amount: 250, category: "Receitas", date: new Date(Date.now() - 72e5).toISOString() },
-  { id: 4, name: "Figma", amount: -20, category: "Assinaturas", date: new Date(Date.now() - 9e4 * 100).toISOString() },
-  { id: 5, name: "Zara", amount: -75, category: "Compras", date: new Date(Date.now() - 1e6 * 10).toISOString() },
-  { id: 6, name: "Stripe", amount: 860, category: "Receitas", date: new Date(Date.now() - 1e6 * 15).toISOString() },
+// ─── Constants ────────────────────────────────────────────────────────────────
+const CATS = ["Assinaturas", "Compras", "Receitas", "Alimentação", "Saúde", "Lazer", "Transferência", "Moradia", "Transporte", "Outros"];
+const PAYMENTS = ["Pix", "Crédito", "Débito", "Dinheiro", "Boleto", "TED/DOC"];
+const WEEK = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const ASSET_TYPES = ["Renda Fixa", "Ações", "FIIs", "Cripto", "Exterior", "Poupança"];
+const DONUT_COLORS = ["#7BCB68", "#60a5fa", "#f59e0b", "#f87171", "#c084fc", "#34d399", "#fb923c"];
+
+const SEED_TX = [
+  { id: 1, name: "Dribbble", amount: -12, category: "Assinaturas", date: new Date().toISOString(), payment: "Crédito", bank: "Nubank" },
+  { id: 2, name: "Amazon", amount: -49.99, category: "Compras", date: new Date(Date.now() - 36e5).toISOString(), payment: "Débito", bank: "Itaú" },
+  { id: 3, name: "Dianne Russell", amount: 250, category: "Receitas", date: new Date(Date.now() - 72e5).toISOString(), payment: "Pix", bank: "Nubank" },
+  { id: 4, name: "Figma", amount: -20, category: "Assinaturas", date: new Date(Date.now() - 9e6).toISOString(), payment: "Crédito", bank: "Nubank" },
+  { id: 5, name: "Zara", amount: -75, category: "Compras", date: new Date(Date.now() - 2e7).toISOString(), payment: "Crédito", bank: "Itaú" },
+  { id: 6, name: "Stripe", amount: 860, category: "Receitas", date: new Date(Date.now() - 3e7).toISOString(), payment: "Pix", bank: "Nubank" },
 ];
-
 const SEED_CARDS = [
   { id: 1, bank: "Nubank", number: "6566 8866 6364 4332", limit: 60000, balance: 4520.34, due: "09/25", color: "#7BCB68" },
-  { id: 2, bank: "Itaú", number: "5412 3300 8821 9988", limit: 15000, balance: 1200, due: "12/26", color: "#A8D99B" },
+  { id: 2, bank: "Itaú", number: "5412 3300 8821 9988", limit: 15000, balance: 1200, due: "12/26", color: "#60a5fa" },
 ];
-
 const SEED_FIXED = [
-  { id: 1, name: "Aluguel", amount: 2200, status: "Pago", installment: null },
-  { id: 2, name: "Financiamento Auto", amount: 890, status: "Pendente", installment: { current: 8, total: 48 } },
-  { id: 3, name: "Empréstimo Pessoal", amount: 500, status: "Pendente", installment: { current: 3, total: 12 } },
-  { id: 4, name: "Internet", amount: 120, status: "Pago", installment: null },
+  { id: 1, name: "Aluguel", amount: 2200, status: "Pago", installment: null, month: new Date().toISOString().slice(0, 7) },
+  { id: 2, name: "Financiamento Auto", amount: 890, status: "Pendente", installment: { current: 8, total: 48 }, month: new Date().toISOString().slice(0, 7) },
+  { id: 3, name: "Empréstimo Pessoal", amount: 500, status: "Pendente", installment: { current: 3, total: 12 }, month: new Date().toISOString().slice(0, 7) },
+  { id: 4, name: "Internet", amount: 120, status: "Pago", installment: null, month: new Date().toISOString().slice(0, 7) },
 ];
-
+const SEED_INVOICES = [
+  { id: 1, name: "Adobe Creative", amount: 20.99, dueDate: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10), status: "Pendente", recurring: true },
+  { id: 2, name: "Freepik", amount: 15, dueDate: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10), status: "Pendente", recurring: false },
+  { id: 3, name: "Google One", amount: 12, dueDate: new Date(Date.now() + 12 * 86400000).toISOString().slice(0, 10), status: "Pendente", recurring: true },
+  { id: 4, name: "Netflix", amount: 55.90, dueDate: new Date(Date.now() - 86400000).toISOString().slice(0, 10), status: "Pago", recurring: true },
+];
+const SEED_ASSETS = [
+  { id: 1, name: "Tesouro Selic 2029", type: "Renda Fixa", amount: 12500, cdiMult: 1.0, manualReturn: 0, purchaseDate: "2024-01-15" },
+  { id: 2, name: "PETR4", type: "Ações", amount: 3200, cdiMult: 0, manualReturn: -1.2, purchaseDate: "2024-03-10" },
+  { id: 3, name: "MXRF11", type: "FIIs", amount: 5800, cdiMult: 0, manualReturn: 0.9, purchaseDate: "2024-02-20" },
+  { id: 4, name: "Bitcoin", type: "Cripto", amount: 2100, cdiMult: 0, manualReturn: 8.3, purchaseDate: "2024-04-01" },
+];
 const SEED_GOALS = [
-  { id: 1, name: "Reserva de Emergência", target: 30000, current: 18500, color: "#7BCB68" },
-  { id: 2, name: "Viagem Europa", target: 15000, current: 4200, color: "#60a5fa" },
-  { id: 3, name: "MacBook Pro", target: 12000, current: 9800, color: "#f59e0b" },
+  { id: 1, name: "Reserva de Emergência", target: 30000, current: 18500, color: "#7BCB68", deadline: "2025-12-31" },
+  { id: 2, name: "Viagem Europa", target: 15000, current: 4200, color: "#60a5fa", deadline: "2026-06-30" },
+  { id: 3, name: "MacBook Pro", target: 12000, current: 9800, color: "#f59e0b", deadline: "2025-09-01" },
 ];
 
-const CATS = ["Assinaturas", "Compras", "Receitas", "Alimentação", "Saúde", "Lazer", "Transferência", "Outros"];
-const WEEK_DAYS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+// ─── Theme ────────────────────────────────────────────────────────────────────
+const makeTheme = (accent = "#7BCB68") => ({
+  bg: "#EEF5E7", card: "#F8FAF5", accent,
+  text: "#1D1D1D", muted: "#7B7B7B", border: "#DFF0D8",
+  danger: "#EF4444", warn: "#F59E0B",
+  shadow: "0 2px 16px rgba(100,160,80,0.08)",
+});
 
-// ─── theme ─────────────────────────────────────────────────────────────────────
-const T = {
-  bg: "#EEF5E7",
-  card: "#F8FAF5",
-  accent: "#7BCB68",
-  accent2: "#A8D99B",
-  text: "#1D1D1D",
-  muted: "#7B7B7B",
-  border: "#DFF0D8",
-  danger: "#EF4444",
-  warn: "#F59E0B",
+// ─── Shared UI ────────────────────────────────────────────────────────────────
+const Card = ({ children, style = {} }) => {
+  const T = makeTheme();
+  return <div style={{ background: T.card, borderRadius: 28, padding: 24, boxShadow: T.shadow, ...style }}>{children}</div>;
 };
 
-const cardShadow = "0 2px 16px rgba(100,160,80,0.08), 0 1px 4px rgba(0,0,0,0.04)";
+const Btn = ({ children, variant = "primary", accent = "#7BCB68", small, full, onClick, disabled, style = {} }) => {
+  const variants = {
+    primary: { background: accent, color: "#fff" },
+    ghost: { background: "#EEF5E7", color: "#1D1D1D" },
+    danger: { background: "#FEE2E2", color: "#EF4444" },
+    outline: { background: "transparent", border: "1.5px solid #DFF0D8", color: "#7B7B7B" },
+  };
+  return (
+    <button disabled={disabled} onClick={onClick}
+      style={{ padding: small ? "7px 14px" : "11px 20px", borderRadius: small ? 10 : 14, fontWeight: 700, fontSize: small ? 12 : 13, border: "none", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 6, width: full ? "100%" : "auto", justifyContent: full ? "center" : "flex-start", transition: "opacity .15s", ...variants[variant], ...style }}>
+      {children}
+    </button>
+  );
+};
 
-// ─── Login Screen ──────────────────────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
-  const [username, setUsername] = useState("");
+const FInput = ({ label, value, onChange, type = "text", placeholder, style = {} }) => {
+  const T = makeTheme();
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {label && <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>{label}</label>}
+      <input type={type} value={value} onChange={onChange} placeholder={placeholder}
+        style={{ width: "100%", padding: "11px 14px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box", ...style }} />
+    </div>
+  );
+};
+
+const FSelect = ({ label, value, onChange, options, style = {} }) => {
+  const T = makeTheme();
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {label && <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>{label}</label>}
+      <select value={value} onChange={onChange}
+        style={{ width: "100%", padding: "11px 14px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: "#EEF5E7", color: "#1D1D1D", outline: "none", boxSizing: "border-box", ...style }}>
+        {options.map(o => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}
+      </select>
+    </div>
+  );
+};
+
+const Badge = ({ children, color = "#7B7B7B", bg = "#EEF5E7" }) => (
+  <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: "3px 10px", borderRadius: 20 }}>{children}</span>
+);
+
+// ─── Physical Card ─────────────────────────────────────────────────────────────
+const PhysicalCard = ({ card, selected, onClick, compact }) => {
+  const W = compact ? 148 : 210, H = compact ? 88 : 126, R = compact ? 14 : 20;
+  return (
+    <div onClick={onClick} style={{ width: W, height: H, borderRadius: R, background: `linear-gradient(135deg, ${card.color} 0%, ${card.color}bb 100%)`, padding: compact ? "12px 14px" : "18px 20px", boxShadow: selected ? `0 8px 32px ${card.color}66` : "0 4px 16px rgba(0,0,0,0.1)", position: "relative", overflow: "hidden", color: "#fff", flexShrink: 0, cursor: onClick ? "pointer" : "default", border: selected ? "2.5px solid #fff" : "2.5px solid transparent", transition: "all .2s", boxSizing: "border-box" }}>
+      <div style={{ position: "absolute", top: -20, right: -20, width: 70, height: 70, borderRadius: "50%", background: "rgba(255,255,255,0.12)" }} />
+      <div style={{ position: "absolute", bottom: -30, left: 0, width: 90, height: 90, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: compact ? 8 : 14 }}>
+        <Wallet size={compact ? 14 : 17} color="rgba(255,255,255,0.9)" />
+        <span style={{ fontSize: compact ? 9 : 11, fontWeight: 700, opacity: 0.85 }}>{card.bank}</span>
+      </div>
+      <p style={{ fontSize: compact ? 9 : 11, letterSpacing: compact ? 1 : 2, margin: `0 0 ${compact ? 4 : 8}px`, opacity: 0.88 }}>{card.number}</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+        <div>
+          <p style={{ fontSize: compact ? 8 : 9, opacity: 0.7, margin: 0 }}>Saldo</p>
+          <p style={{ fontSize: compact ? 11 : 14, fontWeight: 700, margin: 0 }}>{fmt(card.balance)}</p>
+        </div>
+        <p style={{ fontSize: compact ? 8 : 9, opacity: 0.7, margin: 0 }}>Válido {card.due}</p>
+      </div>
+    </div>
+  );
+};
+
+// ─── Login ────────────────────────────────────────────────────────────────────
+function LoginScreen({ profiles, onLogin, onCreateProfile, accent }) {
+  const T = makeTheme(accent);
+  const [mode, setMode] = useState("select");
+  const [selProfile, setSelProfile] = useState(null);
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newPass, setNewPass] = useState("");
 
-  const handle = () => {
-    const storedUser = LS.get("fin_username", "Usuario");
-    const storedPass = LS.get("fin_password", "1234");
-    if (username === storedUser && password === storedPass) {
-      LS.set("fin_logged", true);
-      onLogin(username);
-    } else {
-      setErr("Usuário ou senha incorretos.");
-    }
+  const doLogin = () => {
+    if (password === selProfile.password) { setErr(""); onLogin(selProfile); }
+    else setErr("Senha incorreta.");
+  };
+  const doCreate = () => {
+    if (!newName.trim() || !newPass.trim()) { setErr("Preencha todos os campos."); return; }
+    const p = { id: Date.now(), name: newName.trim(), password: newPass, avatar: null };
+    onCreateProfile(p); setMode("login"); setSelProfile(p); setPassword(newPass); setErr("");
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-family, 'Inter', sans-serif)" }}>
-      <motion.div
-        initial={{ opacity: 0, y: 32 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        style={{ background: T.card, borderRadius: 32, padding: "48px 40px", width: 380, boxShadow: "0 8px 48px rgba(100,160,80,0.15)" }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 32 }}>
-          <div style={{ background: T.accent, borderRadius: 12, padding: 8 }}>
-            <Wallet size={22} color="#fff" />
-          </div>
+    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif" }}>
+      <motion.div initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }}
+        style={{ background: T.card, borderRadius: 32, padding: "44px 40px", width: 400, boxShadow: "0 8px 48px rgba(100,160,80,0.18)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
+          <div style={{ background: T.accent, borderRadius: 12, padding: 8 }}><Wallet size={22} color="#fff" /></div>
           <span style={{ fontWeight: 800, fontSize: 22, color: T.text }}>Finance.</span>
         </div>
-        <h2 style={{ fontSize: 24, fontWeight: 700, color: T.text, marginBottom: 6 }}>Bem-vindo de volta</h2>
-        <p style={{ color: T.muted, fontSize: 14, marginBottom: 28 }}>Acesse sua conta para continuar</p>
 
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: T.text, display: "block", marginBottom: 6 }}>Usuário</label>
-          <input
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handle()}
-            placeholder="Digite seu usuário"
-            style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: `1.5px solid ${T.border}`, fontSize: 14, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }}
-          />
-        </div>
-        <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: T.text, display: "block", marginBottom: 6 }}>Senha</label>
-          <div style={{ position: "relative" }}>
-            <input
-              type={show ? "text" : "password"}
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handle()}
-              placeholder="Digite sua senha"
-              style={{ width: "100%", padding: "12px 16px", paddingRight: 44, borderRadius: 14, border: `1.5px solid ${T.border}`, fontSize: 14, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }}
-            />
+        {mode === "select" && (<>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: T.text, marginBottom: 6 }}>Selecione o perfil</h2>
+          <p style={{ color: T.muted, fontSize: 13, marginBottom: 22 }}>Escolha um perfil para continuar</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+            {profiles.map(p => (
+              <button key={p.id} onClick={() => { setSelProfile(p); setMode("login"); setErr(""); setPassword(""); }}
+                style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", borderRadius: 16, border: `1.5px solid ${T.border}`, background: T.bg, cursor: "pointer" }}>
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: T.accent, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {p.avatar ? <img src={p.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>{p.name[0].toUpperCase()}</span>}
+                </div>
+                <span style={{ fontWeight: 700, fontSize: 15, color: T.text }}>{p.name}</span>
+              </button>
+            ))}
+          </div>
+          <Btn full accent={T.accent} onClick={() => { setMode("create"); setErr(""); }}><Plus size={15} /> Novo Perfil</Btn>
+        </>)}
+
+        {mode === "login" && selProfile && (<>
+          <button onClick={() => { setMode("select"); setPassword(""); setErr(""); }} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 16 }}>
+            <ChevronLeft size={15} /> Voltar
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+            <div style={{ width: 52, height: 52, borderRadius: "50%", background: T.accent, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {selProfile.avatar ? <img src={selProfile.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#fff", fontWeight: 700, fontSize: 20 }}>{selProfile.name[0].toUpperCase()}</span>}
+            </div>
+            <div>
+              <p style={{ fontSize: 18, fontWeight: 800, color: T.text, margin: 0 }}>{selProfile.name}</p>
+              <p style={{ fontSize: 12, color: T.muted, margin: 0 }}>Digite a senha para entrar</p>
+            </div>
+          </div>
+          <div style={{ marginBottom: 20, position: "relative" }}>
+            <input type={show ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && doLogin()} placeholder="Senha"
+              style={{ width: "100%", padding: "13px 44px 13px 16px", borderRadius: 14, border: `1.5px solid ${T.border}`, fontSize: 14, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }} />
             <button onClick={() => setShow(!show)} style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.muted }}>
-              {show ? <EyeOff size={18} /> : <Eye size={18} />}
+              {show ? <EyeOff size={17} /> : <Eye size={17} />}
             </button>
           </div>
-        </div>
-        {err && <p style={{ color: T.danger, fontSize: 13, marginBottom: 16, textAlign: "center" }}>{err}</p>}
-        <button
-          onClick={handle}
-          style={{ width: "100%", padding: "14px", borderRadius: 16, background: T.accent, color: "#fff", fontWeight: 700, fontSize: 15, border: "none", cursor: "pointer", transition: "opacity .15s" }}
-          onMouseEnter={e => e.target.style.opacity = 0.88}
-          onMouseLeave={e => e.target.style.opacity = 1}
-        >
-          Entrar
-        </button>
-        <p style={{ fontSize: 12, color: T.muted, textAlign: "center", marginTop: 16 }}>
-          Padrão: usuário <b>Usuario</b> / senha <b>1234</b>
-        </p>
+          {err && <p style={{ color: T.danger, fontSize: 13, marginBottom: 12 }}>{err}</p>}
+          <Btn full accent={T.accent} onClick={doLogin}>Entrar</Btn>
+          <p style={{ fontSize: 11, color: T.muted, textAlign: "center", marginTop: 14 }}>Senha padrão: <b>1234</b></p>
+        </>)}
+
+        {mode === "create" && (<>
+          <button onClick={() => { setMode("select"); setErr(""); }} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 16 }}>
+            <ChevronLeft size={15} /> Voltar
+          </button>
+          <h3 style={{ fontSize: 18, fontWeight: 800, color: T.text, marginBottom: 20 }}>Criar Novo Perfil</h3>
+          <FInput label="Nome do Perfil" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex: João Silva" />
+          <FInput label="Senha" value={newPass} onChange={e => setNewPass(e.target.value)} type="password" placeholder="Crie uma senha" />
+          {err && <p style={{ color: T.danger, fontSize: 13, marginBottom: 12 }}>{err}</p>}
+          <Btn full accent={T.accent} onClick={doCreate}><Plus size={15} /> Criar Perfil</Btn>
+        </>)}
       </motion.div>
     </div>
   );
 }
 
-// ─── Sidebar ───────────────────────────────────────────────────────────────────
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
 const NAV = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "transactions", label: "Transações", icon: ArrowLeftRight },
-  { id: "cards", label: "Cartão", icon: CreditCard },
-  { id: "fixed", label: "Despesas Fixas", icon: Receipt },
-  { id: "investments", label: "Investimentos", icon: TrendingUp },
-  { id: "ai", label: "Assistente IA", icon: Bot },
-  { id: "settings", label: "Configurações", icon: Settings },
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "principal" },
+  { id: "transactions", label: "Transações", icon: ArrowLeftRight, group: "principal" },
+  { id: "cards", label: "Cartão", icon: CreditCard, group: "principal" },
+  { id: "fixed", label: "Despesas Fixas", icon: Receipt, group: "principal" },
+  { id: "invoices", label: "Faturas", icon: FileText, group: "principal" },
+  { id: "investments", label: "Investimentos", icon: TrendingUp, group: "principal" },
+  { id: "ai", label: "Assistente IA", icon: Bot, group: "geral" },
+  { id: "settings", label: "Configurações", icon: Settings, group: "geral" },
 ];
 
-function Sidebar({ active, setActive, username, onLogout }) {
+function Sidebar({ active, setActive, profile, onLogout, accent, allProfiles, onSwitchProfile }) {
+  const T = makeTheme(accent);
+  const [showMenu, setShowMenu] = useState(false);
+
   return (
-    <div style={{ width: 220, minWidth: 220, background: T.card, height: "100vh", display: "flex", flexDirection: "column", padding: "28px 16px 24px", boxShadow: "2px 0 12px rgba(0,0,0,0.03)", position: "sticky", top: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 32, paddingLeft: 8 }}>
-        <div style={{ background: T.accent, borderRadius: 10, padding: 7 }}>
-          <Wallet size={18} color="#fff" />
-        </div>
-        <span style={{ fontWeight: 800, fontSize: 19, color: T.text }}>Finance.</span>
+    <div style={{ width: 228, minWidth: 228, background: T.card, height: "100vh", display: "flex", flexDirection: "column", padding: "22px 13px 18px", boxShadow: "2px 0 12px rgba(0,0,0,0.03)", position: "sticky", top: 0, zIndex: 100 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 26, paddingLeft: 8 }}>
+        <div style={{ background: T.accent, borderRadius: 10, padding: 7 }}><Wallet size={17} color="#fff" /></div>
+        <span style={{ fontWeight: 800, fontSize: 18, color: T.text }}>Finance.</span>
       </div>
 
-      <p style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 10, paddingLeft: 10, letterSpacing: 1 }}>MENU PRINCIPAL</p>
-      {NAV.slice(0, 6).map(item => (
-        <NavItem key={item.id} item={item} active={active} setActive={setActive} />
+      {["principal", "geral"].map(grp => (
+        <div key={grp}>
+          <p style={{ fontSize: 10, fontWeight: 800, color: T.accent, margin: "6px 0 5px 10px", letterSpacing: 1.2, textTransform: "uppercase" }}>{grp === "principal" ? "Menu Principal" : "Geral"}</p>
+          {NAV.filter(n => n.group === grp).map(item => {
+            const Icon = item.icon;
+            const isActive = active === item.id;
+            return (
+              <button key={item.id} onClick={() => setActive(item.id)}
+                style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", cursor: "pointer", background: isActive ? T.accent : "transparent", color: isActive ? "#fff" : T.muted, fontWeight: isActive ? 700 : 500, fontSize: 13, transition: "all .15s", marginBottom: 2, textAlign: "left" }}>
+                <Icon size={16} />{item.label}
+              </button>
+            );
+          })}
+        </div>
       ))}
 
-      <p style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginTop: 20, marginBottom: 10, paddingLeft: 10, letterSpacing: 1 }}>GERAL</p>
-      <NavItem item={NAV[6]} active={active} setActive={setActive} />
-      <NavItem item={{ id: "logout", label: "Sair", icon: LogOut }} active={active} setActive={() => onLogout()} />
+      <button onClick={onLogout} style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", padding: "10px 12px", borderRadius: 12, border: "none", cursor: "pointer", background: "transparent", color: T.muted, fontWeight: 500, fontSize: 13, marginTop: 4 }}>
+        <LogOut size={16} />Sair
+      </button>
 
-      <div style={{ marginTop: "auto", paddingTop: 20, borderTop: `1px solid ${T.border}` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 10px" }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%", background: T.accent, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "#fff", fontSize: 15 }}>
-            {username ? username[0].toUpperCase() : "U"}
+      <div style={{ marginTop: "auto", paddingTop: 14, borderTop: `1px solid ${T.border}`, position: "relative" }}>
+        <button onClick={() => setShowMenu(!showMenu)}
+          style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px", background: "none", border: "none", cursor: "pointer", borderRadius: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: "50%", background: T.accent, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            {profile?.avatar ? <img src={profile.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>{(profile?.name || "U")[0].toUpperCase()}</span>}
           </div>
-          <div>
-            <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0 }}>{username}</p>
-            <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>Ver perfil</p>
+          <div style={{ flex: 1, textAlign: "left" }}>
+            <p style={{ fontSize: 12, fontWeight: 700, color: T.text, margin: 0 }}>{profile?.name || "Usuário"}</p>
+            <p style={{ fontSize: 10, color: T.accent, margin: 0 }}>Ver perfil</p>
           </div>
-        </div>
+          <ChevronDown size={14} color={T.muted} />
+        </button>
+        <AnimatePresence>
+          {showMenu && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+              style={{ position: "absolute", bottom: "100%", left: 0, right: 0, background: T.card, borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", padding: "8px", zIndex: 200, marginBottom: 4 }}>
+              {allProfiles.filter(p => p.id !== profile?.id).map(p => (
+                <button key={p.id} onClick={() => { onSwitchProfile(p); setShowMenu(false); }}
+                  style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 12px", borderRadius: 10, border: "none", cursor: "pointer", background: "transparent", color: T.text, fontSize: 12, fontWeight: 600 }}>
+                  <RefreshCw size={13} />Trocar para {p.name}
+                </button>
+              ))}
+              <div style={{ borderTop: `1px solid ${T.border}`, margin: "4px 0" }} />
+              <button onClick={() => { onLogout(); setShowMenu(false); }}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 12px", borderRadius: 10, border: "none", cursor: "pointer", background: "transparent", color: makeTheme().danger, fontSize: 12, fontWeight: 600 }}>
+                <LogOut size={13} />Sair
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
 }
 
-function NavItem({ item, active, setActive }) {
-  const isActive = active === item.id;
-  const Icon = item.icon;
+// ─── Header ───────────────────────────────────────────────────────────────────
+function Header({ profile, onLogout, invoices, fixedExpenses, accent, searchQuery, setSearchQuery, onSwitchProfile, allProfiles }) {
+  const T = makeTheme(accent);
+  const [showNotif, setShowNotif] = useState(false);
+  const [showUser, setShowUser] = useState(false);
+
+  const notifications = useMemo(() => {
+    const n = [];
+    invoices.forEach(inv => {
+      const d = daysUntil(inv.dueDate);
+      if (inv.status !== "Pago" && d <= 7) n.push({ text: `${inv.name} vence em ${d <= 0 ? "hoje/ontem" : d + " dia(s)"}`, urgent: d <= 2, name: inv.name, amount: inv.amount });
+    });
+    fixedExpenses.forEach(f => {
+      if (f.status === "Pendente") n.push({ text: `${f.name} está pendente`, urgent: false, name: f.name, amount: f.amount });
+    });
+    return n;
+  }, [invoices, fixedExpenses]);
+
   return (
-    <button
-      onClick={() => setActive(item.id)}
-      style={{
-        display: "flex", alignItems: "center", gap: 11, width: "100%",
-        padding: "10px 12px", borderRadius: 12, border: "none", cursor: "pointer",
-        background: isActive ? T.accent : "transparent",
-        color: isActive ? "#fff" : T.muted,
-        fontWeight: isActive ? 700 : 500, fontSize: 14,
-        transition: "all .15s", marginBottom: 2, textAlign: "left"
-      }}
-    >
-      <Icon size={17} />
-      {item.label}
-    </button>
+    <div style={{ background: T.card, padding: "13px 26px", display: "flex", alignItems: "center", gap: 14, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0, zIndex: 90 }}>
+      <div style={{ position: "relative", flex: 1, maxWidth: 340 }}>
+        <Search size={14} style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: T.muted }} />
+        <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Buscar transações, metas, faturas..."
+          style={{ padding: "9px 36px", borderRadius: 14, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", width: "100%", boxSizing: "border-box" }} />
+        {searchQuery && <button onClick={() => setSearchQuery("")} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.muted }}><X size={13} /></button>}
+      </div>
+
+      <div style={{ position: "relative" }}>
+        <button onClick={() => { setShowNotif(!showNotif); setShowUser(false); }}
+          style={{ background: "none", border: "none", cursor: "pointer", color: T.muted, display: "flex", position: "relative", padding: 4 }}>
+          <Bell size={20} />
+          {notifications.length > 0 && <span style={{ position: "absolute", top: 0, right: 0, width: 9, height: 9, background: T.danger, borderRadius: "50%", border: `2px solid ${T.card}` }} />}
+        </button>
+        <AnimatePresence>
+          {showNotif && (
+            <motion.div initial={{ opacity: 0, y: 8, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.95 }}
+              style={{ position: "absolute", right: 0, top: "calc(100% + 10px)", background: T.card, borderRadius: 20, boxShadow: "0 8px 40px rgba(0,0,0,0.14)", width: 320, zIndex: 300, padding: 16, maxHeight: 360, overflowY: "auto" }}>
+              <p style={{ fontSize: 14, fontWeight: 800, color: T.text, marginBottom: 12 }}>Notificações</p>
+              {notifications.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: "16px 0" }}>Tudo em dia! ✅</p>}
+              {notifications.map((n, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, padding: 10, borderRadius: 12, background: n.urgent ? "#FEF2F2" : T.bg, marginBottom: 8 }}>
+                  <AlertCircle size={16} color={n.urgent ? T.danger : T.warn} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: T.text, margin: 0 }}>{n.name}</p>
+                    <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>{n.text}</p>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: n.urgent ? T.danger : T.warn, margin: "2px 0 0" }}>{fmt(n.amount)}</p>
+                  </div>
+                </div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div style={{ position: "relative" }}>
+        <button onClick={() => { setShowUser(!showUser); setShowNotif(false); }}
+          style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer" }}>
+          <div style={{ width: 36, height: 36, borderRadius: "50%", background: T.accent, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {profile?.avatar ? <img src={profile.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>{(profile?.name || "U")[0].toUpperCase()}</span>}
+          </div>
+          <div style={{ textAlign: "left" }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0 }}>{profile?.name || "Usuário"}</p>
+            <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>Área de trabalho</p>
+          </div>
+          <ChevronDown size={14} color={T.muted} />
+        </button>
+        <AnimatePresence>
+          {showUser && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+              style={{ position: "absolute", right: 0, top: "calc(100% + 10px)", background: T.card, borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", width: 200, zIndex: 300, padding: 8 }}>
+              {allProfiles.filter(p => p.id !== profile?.id).map(p => (
+                <button key={p.id} onClick={() => { onSwitchProfile(p); setShowUser(false); }}
+                  style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: "transparent", color: T.text, fontSize: 13, fontWeight: 600 }}>
+                  <RefreshCw size={13} />Trocar para {p.name}
+                </button>
+              ))}
+              <div style={{ borderTop: `1px solid ${T.border}`, margin: "4px 0" }} />
+              <button onClick={onLogout} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: "transparent", color: T.danger, fontSize: 13, fontWeight: 600 }}>
+                <LogOut size={13} />Sair
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
   );
 }
 
 // ─── Dashboard Tab ─────────────────────────────────────────────────────────────
-function DashboardTab({ transactions, cards }) {
-  const balance = transactions.reduce((a, t) => a + t.amount, 0);
-  const income = transactions.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0);
-  const expenses = transactions.filter(t => t.amount < 0).reduce((a, t) => a + Math.abs(t.amount), 0);
-
-  const catMap = {};
-  transactions.filter(t => t.amount < 0).forEach(t => {
-    catMap[t.category] = (catMap[t.category] || 0) + Math.abs(t.amount);
-  });
-  const donutData = Object.entries(catMap).map(([name, value]) => ({ name, value }));
-  const DONUT_COLORS = ["#7BCB68", "#A8D99B", "#60a5fa", "#f59e0b", "#f87171", "#c084fc"];
-
-  const weekData = WEEK_DAYS.map((d, i) => {
-    const dayTx = transactions.filter(t => new Date(t.date).getDay() === (i + 1) % 7);
-    return { name: d, value: dayTx.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0) };
-  });
-
-  const upcomingBills = [
-    { name: "Adobe", icon: "🅰", amount: 20.99, date: "30 mai" },
-    { name: "Freepik", icon: "🖌", amount: 15.00, date: "30 mai" },
-    { name: "Google", icon: "G", amount: 12.00, date: "24 mai" },
-  ];
-
-  const mainCard = cards[0] || SEED_CARDS[0];
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "auto auto", gap: 20 }}>
-      {/* Balance Card */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
-        style={{ gridColumn: "1 / 3", background: T.card, borderRadius: 28, padding: "28px 32px", boxShadow: cardShadow, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <p style={{ color: T.muted, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Saldo Disponível</p>
-          <h1 style={{ fontSize: 44, fontWeight: 800, color: T.text, margin: 0 }}>{fmt(balance)}</h1>
-          <div style={{ display: "flex", gap: 28, marginTop: 18 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", border: `3px solid ${T.accent}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: T.accent }} />
-              </div>
-              <div>
-                <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>Saldo no Cartão</p>
-                <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0 }}>{fmt(mainCard.balance)}</p>
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", border: `3px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: T.muted }} />
-              </div>
-              <div>
-                <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>Limite de Crédito</p>
-                <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0 }}>{fmt(mainCard.limit)}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <PhysicalCard card={mainCard} />
-      </motion.div>
-
-      {/* Upcoming Bills */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-        style={{ background: T.card, borderRadius: 28, padding: "24px 24px", boxShadow: cardShadow }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <p style={{ fontWeight: 700, fontSize: 15, color: T.text, margin: 0 }}>Próximas Faturas</p>
-          <span style={{ fontSize: 13, color: T.accent, fontWeight: 600, cursor: "pointer" }}>Ver todas</span>
-        </div>
-        {upcomingBills.map((b, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{b.icon}</div>
-            <div style={{ flex: 1 }}>
-              <p style={{ fontWeight: 700, fontSize: 13, color: T.text, margin: 0 }}>{b.name}</p>
-              <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>Última cobrança {b.date}</p>
-            </div>
-            <span style={{ fontWeight: 700, fontSize: 13, color: T.text }}>{fmt(b.amount)}</span>
-          </div>
-        ))}
-      </motion.div>
-
-      {/* Donut Chart */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-        style={{ gridColumn: "2 / 3", background: T.card, borderRadius: 28, padding: "24px", boxShadow: cardShadow }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <p style={{ fontWeight: 700, fontSize: 15, color: T.text, margin: 0 }}>Resumo de Gastos</p>
-          <span style={{ fontSize: 12, color: T.muted }}>Este mês</span>
-        </div>
-        <div style={{ position: "relative", height: 180 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie data={donutData.length ? donutData : [{ name: "Sem dados", value: 1 }]} cx="50%" cy="50%" innerRadius={55} outerRadius={80} dataKey="value">
-                {donutData.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center" }}>
-            <p style={{ fontSize: 16, fontWeight: 800, color: T.text, margin: 0 }}>
-              {income > 0 ? `+${Math.round(((income - expenses) / (expenses || 1)) * 100)}%` : "—"}
-            </p>
-            <p style={{ fontSize: 10, color: T.muted, margin: 0 }}>vs mês ant.</p>
-          </div>
-        </div>
-        <div style={{ marginTop: 8 }}>
-          {donutData.slice(0, 3).map((d, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: DONUT_COLORS[i] }} />
-                <span style={{ fontSize: 12, color: T.muted }}>{d.name}</span>
-              </div>
-              <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{fmt(d.value)}</span>
-            </div>
-          ))}
-        </div>
-      </motion.div>
-
-      {/* Bar Chart */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-        style={{ background: T.card, borderRadius: 28, padding: "24px", boxShadow: cardShadow }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <p style={{ fontWeight: 700, fontSize: 15, color: T.text, margin: 0 }}>Fluxo de Caixa</p>
-          <span style={{ fontSize: 12, color: T.muted }}>Esta semana</span>
-        </div>
-        <p style={{ fontSize: 20, fontWeight: 800, color: T.text, margin: "8px 0 16px" }}>{fmt(income)}</p>
-        <ResponsiveContainer width="100%" height={120}>
-          <BarChart data={weekData} barSize={14}>
-            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: T.muted }} />
-            <YAxis hide />
-            <Tooltip contentStyle={{ borderRadius: 10, border: "none", fontSize: 12 }} />
-            <Bar dataKey="value" fill={T.accent} radius={[6, 6, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </motion.div>
-
-      {/* Stats row */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}
-        style={{ background: T.accent, borderRadius: 28, padding: "24px", boxShadow: cardShadow, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-        <p style={{ color: "rgba(255,255,255,0.75)", fontSize: 12, marginBottom: 6 }}>Total de Entradas</p>
-        <p style={{ color: "#fff", fontSize: 26, fontWeight: 800, margin: 0 }}>{fmt(income)}</p>
-        <div style={{ marginTop: 12, height: 4, background: "rgba(255,255,255,0.3)", borderRadius: 4 }}>
-          <div style={{ width: `${Math.min((income / (income + expenses || 1)) * 100, 100)}%`, height: "100%", background: "#fff", borderRadius: 4 }} />
-        </div>
-      </motion.div>
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.24 }}
-        style={{ background: T.card, borderRadius: 28, padding: "24px", boxShadow: cardShadow, display: "flex", flexDirection: "column", justifyContent: "center", border: `1.5px solid ${T.border}` }}>
-        <p style={{ color: T.muted, fontSize: 12, marginBottom: 6 }}>Total de Saídas</p>
-        <p style={{ color: T.danger, fontSize: 26, fontWeight: 800, margin: 0 }}>-{fmt(expenses)}</p>
-        <div style={{ marginTop: 12, height: 4, background: T.border, borderRadius: 4 }}>
-          <div style={{ width: `${Math.min((expenses / (income + expenses || 1)) * 100, 100)}%`, height: "100%", background: T.danger, borderRadius: 4 }} />
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
-function PhysicalCard({ card }) {
-  return (
-    <div style={{ width: 200, height: 118, background: `linear-gradient(135deg, ${card.color} 0%, #5aa847 100%)`, borderRadius: 18, padding: "16px 18px", boxShadow: "0 8px 24px rgba(100,180,80,0.3)", position: "relative", overflow: "hidden", color: "#fff", flexShrink: 0 }}>
-      <div style={{ position: "absolute", top: -20, right: -20, width: 80, height: 80, borderRadius: "50%", background: "rgba(255,255,255,0.1)" }} />
-      <div style={{ position: "absolute", bottom: -30, left: -10, width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
-        <Wallet size={18} color="rgba(255,255,255,0.9)" />
-        <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.8 }}>{card.bank}</span>
-      </div>
-      <p style={{ fontSize: 11, letterSpacing: 2, margin: "0 0 6px", opacity: 0.9 }}>{card.number}</p>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-        <div>
-          <p style={{ fontSize: 9, opacity: 0.7, margin: 0 }}>Saldo</p>
-          <p style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{fmt(card.balance)}</p>
-        </div>
-        <p style={{ fontSize: 10, opacity: 0.7, margin: 0 }}>Válido {card.due}</p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Transactions Tab ──────────────────────────────────────────────────────────
-function TransactionsTab({ transactions, setTransactions }) {
-  const [form, setForm] = useState({ name: "", amount: "", category: "Compras", type: "expense", date: new Date().toISOString().slice(0, 10) });
-  const [filter, setFilter] = useState("Todos");
-
-  const add = () => {
-    if (!form.name || !form.amount) return;
-    const tx = {
-      id: Date.now(),
-      name: form.name,
-      amount: form.type === "expense" ? -Math.abs(parseFloat(form.amount)) : Math.abs(parseFloat(form.amount)),
-      category: form.category,
-      date: new Date(form.date).toISOString(),
-    };
-    const updated = [tx, ...transactions];
-    setTransactions(updated);
-    LS.set("fin_transactions", updated);
-    setForm({ name: "", amount: "", category: "Compras", type: "expense", date: new Date().toISOString().slice(0, 10) });
-  };
-
-  const remove = (id) => {
-    const updated = transactions.filter(t => t.id !== id);
-    setTransactions(updated);
-    LS.set("fin_transactions", updated);
-  };
-
-  const filtered = filter === "Todos" ? transactions : transactions.filter(t => t.category === filter);
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 20 }}>
-      <div style={{ background: T.card, borderRadius: 28, padding: 28, boxShadow: cardShadow, height: "fit-content" }}>
-        <h3 style={{ fontSize: 16, fontWeight: 800, color: T.text, marginBottom: 20 }}>Nova Transação</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {["expense", "income"].map(t => (
-            <button key={t} onClick={() => setForm(f => ({ ...f, type: t, category: t === "income" ? "Receitas" : "Compras" }))}
-              style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13,
-                background: form.type === t ? (t === "expense" ? T.danger : T.accent) : T.bg,
-                color: form.type === t ? "#fff" : T.muted }}>
-              {t === "expense" ? "Despesa" : "Receita"}
-            </button>
-          ))}
-        </div>
-        {[
-          { label: "Descrição", key: "name", type: "text", placeholder: "Ex: Supermercado" },
-          { label: "Valor (R$)", key: "amount", type: "number", placeholder: "0,00" },
-          { label: "Data", key: "date", type: "date" },
-        ].map(f => (
-          <div key={f.key} style={{ marginBottom: 14 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>{f.label}</label>
-            <input type={f.type} value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
-              placeholder={f.placeholder}
-              style={{ width: "100%", padding: "11px 14px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }} />
-          </div>
-        ))}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>Categoria</label>
-          <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}
-            style={{ width: "100%", padding: "11px 14px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }}>
-            {CATS.map(c => <option key={c}>{c}</option>)}
-          </select>
-        </div>
-        <button onClick={add}
-          style={{ width: "100%", padding: "13px", borderRadius: 14, background: T.accent, color: "#fff", fontWeight: 700, fontSize: 14, border: "none", cursor: "pointer" }}>
-          + Adicionar
-        </button>
-      </div>
-
-      <div style={{ background: T.card, borderRadius: 28, padding: 28, boxShadow: cardShadow }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h3 style={{ fontSize: 16, fontWeight: 800, color: T.text, margin: 0 }}>Histórico</h3>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {["Todos", ...CATS].map(c => (
-              <button key={c} onClick={() => setFilter(c)}
-                style={{ padding: "5px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600,
-                  background: filter === c ? T.accent : T.bg, color: filter === c ? "#fff" : T.muted }}>
-                {c}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 12px", marginBottom: 10, padding: "0 4px" }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: T.muted }}>TRANSAÇÃO</span>
-          <span style={{ fontSize: 11, fontWeight: 700, color: T.muted }}>VALOR</span>
-          <span style={{ fontSize: 11, fontWeight: 700, color: T.muted }}>AÇÃO</span>
-        </div>
-        {filtered.length === 0 && <p style={{ color: T.muted, textAlign: "center", padding: 32 }}>Nenhuma transação</p>}
-        {filtered.map((t, i) => (
-          <motion.div key={t.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.03 }}
-            style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 12px", alignItems: "center", padding: "12px 4px", borderBottom: `1px solid ${T.border}` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>
-                {t.amount > 0 ? "💰" : "🛒"}
-              </div>
-              <div>
-                <p style={{ fontWeight: 700, fontSize: 13, color: T.text, margin: 0 }}>{t.name}</p>
-                <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>{fmtDate(t.date)} · {t.category}</p>
-              </div>
-            </div>
-            <span style={{ fontWeight: 700, fontSize: 14, color: t.amount > 0 ? T.accent : T.danger }}>{t.amount > 0 ? "+" : ""}{fmt(t.amount)}</span>
-            <button onClick={() => remove(t.id)} style={{ background: "none", border: "none", cursor: "pointer", color: T.muted }}>
-              <Trash2 size={15} />
-            </button>
-          </motion.div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Cards Tab ─────────────────────────────────────────────────────────────────
-function CardsTab({ cards, setCards }) {
-  const [form, setForm] = useState({ bank: "", number: "", limit: "", balance: "", due: "", color: "#7BCB68" });
-  const [show, setShow] = useState(false);
-
-  const add = () => {
-    if (!form.bank || !form.number) return;
-    const updated = [...cards, { id: Date.now(), ...form, limit: parseFloat(form.limit) || 0, balance: parseFloat(form.balance) || 0 }];
-    setCards(updated);
-    LS.set("fin_cards", updated);
-    setForm({ bank: "", number: "", limit: "", balance: "", due: "", color: "#7BCB68" });
-    setShow(false);
-  };
-
-  const remove = (id) => {
-    const updated = cards.filter(c => c.id !== id);
-    setCards(updated);
-    LS.set("fin_cards", updated);
-  };
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h2 style={{ fontWeight: 800, fontSize: 20, color: T.text, margin: 0 }}>Meus Cartões</h2>
-        <button onClick={() => setShow(!show)}
-          style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 18px", borderRadius: 14, background: T.accent, color: "#fff", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer" }}>
-          <Plus size={15} /> Novo Cartão
-        </button>
-      </div>
-
-      <AnimatePresence>
-        {show && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-            style={{ background: T.card, borderRadius: 24, padding: 24, boxShadow: cardShadow, marginBottom: 20, overflow: "hidden" }}>
-            <h4 style={{ fontWeight: 700, fontSize: 15, color: T.text, marginBottom: 16 }}>Adicionar Cartão</h4>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-              {[
-                { label: "Banco", key: "bank", placeholder: "Ex: Nubank" },
-                { label: "Número", key: "number", placeholder: "0000 0000 0000 0000" },
-                { label: "Validade", key: "due", placeholder: "MM/AA" },
-                { label: "Limite (R$)", key: "limit", placeholder: "10000" },
-                { label: "Saldo (R$)", key: "balance", placeholder: "0" },
-              ].map(f => (
-                <div key={f.key}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>{f.label}</label>
-                  <input value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
-                    placeholder={f.placeholder}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }} />
-                </div>
-              ))}
-              <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>Cor</label>
-                <input type="color" value={form.color} onChange={e => setForm(p => ({ ...p, color: e.target.value }))}
-                  style={{ width: "100%", height: 42, borderRadius: 12, border: `1.5px solid ${T.border}`, cursor: "pointer" }} />
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-              <button onClick={add} style={{ padding: "10px 24px", borderRadius: 12, background: T.accent, color: "#fff", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer" }}>Salvar</button>
-              <button onClick={() => setShow(false)} style={{ padding: "10px 24px", borderRadius: 12, background: T.bg, color: T.muted, fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer" }}>Cancelar</button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 20 }}>
-        {cards.map(card => (
-          <motion.div key={card.id} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-            style={{ background: T.card, borderRadius: 24, padding: 20, boxShadow: cardShadow }}>
-            <PhysicalCard card={card} />
-            <div style={{ marginTop: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: T.muted }}>Uso do limite</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>{Math.round((card.balance / card.limit) * 100)}%</span>
-              </div>
-              <div style={{ height: 6, background: T.bg, borderRadius: 3 }}>
-                <div style={{ width: `${Math.min((card.balance / card.limit) * 100, 100)}%`, height: "100%", background: card.color, borderRadius: 3 }} />
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
-                <div>
-                  <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>Saldo</p>
-                  <p style={{ fontSize: 14, fontWeight: 700, color: T.text, margin: 0 }}>{fmt(card.balance)}</p>
-                </div>
-                <div>
-                  <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>Limite</p>
-                  <p style={{ fontSize: 14, fontWeight: 700, color: T.text, margin: 0 }}>{fmt(card.limit)}</p>
-                </div>
-                <button onClick={() => remove(card.id)} style={{ background: "none", border: "none", cursor: "pointer", color: T.muted, alignSelf: "flex-end" }}>
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Fixed Expenses Tab ────────────────────────────────────────────────────────
-function FixedTab({ fixed, setFixed }) {
-  const [form, setForm] = useState({ name: "", amount: "", hasInstallment: false, current: "", total: "" });
-
-  const add = () => {
-    if (!form.name || !form.amount) return;
-    const item = {
-      id: Date.now(),
-      name: form.name,
-      amount: parseFloat(form.amount),
-      status: "Pendente",
-      installment: form.hasInstallment ? { current: parseInt(form.current), total: parseInt(form.total) } : null,
-    };
-    const updated = [...fixed, item];
-    setFixed(updated);
-    LS.set("fin_fixed", updated);
-    setForm({ name: "", amount: "", hasInstallment: false, current: "", total: "" });
-  };
-
-  const toggle = (id) => {
-    const updated = fixed.map(f => f.id === id ? { ...f, status: f.status === "Pago" ? "Pendente" : "Pago" } : f);
-    setFixed(updated);
-    LS.set("fin_fixed", updated);
-  };
-
-  const remove = (id) => {
-    const updated = fixed.filter(f => f.id !== id);
-    setFixed(updated);
-    LS.set("fin_fixed", updated);
-  };
-
-  const total = fixed.reduce((a, f) => a + f.amount, 0);
-  const paid = fixed.filter(f => f.status === "Pago").reduce((a, f) => a + f.amount, 0);
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 20 }}>
-      <div>
-        <div style={{ background: T.card, borderRadius: 24, padding: 24, boxShadow: cardShadow, marginBottom: 16 }}>
-          <h4 style={{ fontWeight: 700, fontSize: 15, color: T.text, marginBottom: 16 }}>Nova Despesa Fixa</h4>
-          {[{ label: "Nome", key: "name", placeholder: "Ex: Aluguel" }, { label: "Valor (R$)", key: "amount", placeholder: "0" }].map(f => (
-            <div key={f.key} style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>{f.label}</label>
-              <input value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
-                placeholder={f.placeholder}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }} />
-            </div>
-          ))}
-          <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, cursor: "pointer" }}>
-            <input type="checkbox" checked={form.hasInstallment} onChange={e => setForm(p => ({ ...p, hasInstallment: e.target.checked }))} />
-            <span style={{ fontSize: 13, color: T.text }}>Parcelado?</span>
-          </label>
-          {form.hasInstallment && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-              <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>Parcela atual</label>
-                <input type="number" value={form.current} onChange={e => setForm(p => ({ ...p, current: e.target.value }))}
-                  style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }} />
-              </div>
-              <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>Total parcelas</label>
-                <input type="number" value={form.total} onChange={e => setForm(p => ({ ...p, total: e.target.value }))}
-                  style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }} />
-              </div>
-            </div>
-          )}
-          <button onClick={add}
-            style={{ width: "100%", padding: "12px", borderRadius: 14, background: T.accent, color: "#fff", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer" }}>
-            Adicionar
-          </button>
-        </div>
-
-        <div style={{ background: T.card, borderRadius: 24, padding: 24, boxShadow: cardShadow }}>
-          <p style={{ fontSize: 13, color: T.muted, margin: "0 0 4px" }}>Total de despesas fixas</p>
-          <p style={{ fontSize: 24, fontWeight: 800, color: T.danger, margin: "0 0 12px" }}>{fmt(total)}</p>
-          <div style={{ height: 6, background: T.bg, borderRadius: 3, marginBottom: 8 }}>
-            <div style={{ width: `${total > 0 ? (paid / total) * 100 : 0}%`, height: "100%", background: T.accent, borderRadius: 3, transition: "width .4s" }} />
-          </div>
-          <p style={{ fontSize: 12, color: T.muted, margin: 0 }}>{fmt(paid)} pago de {fmt(total)}</p>
-        </div>
-      </div>
-
-      <div style={{ background: T.card, borderRadius: 24, padding: 24, boxShadow: cardShadow }}>
-        <h3 style={{ fontSize: 16, fontWeight: 800, color: T.text, marginBottom: 20 }}>Despesas & Dívidas</h3>
-        {fixed.length === 0 && <p style={{ color: T.muted, textAlign: "center", padding: 32 }}>Nenhuma despesa cadastrada</p>}
-        {fixed.map(item => (
-          <motion.div key={item.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            style={{ display: "flex", alignItems: "center", padding: "14px 0", borderBottom: `1px solid ${T.border}` }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <p style={{ fontWeight: 700, fontSize: 14, color: T.text, margin: 0 }}>{item.name}</p>
-                {item.installment && (
-                  <span style={{ fontSize: 11, background: T.bg, padding: "2px 8px", borderRadius: 8, color: T.muted, fontWeight: 600 }}>
-                    {item.installment.current}/{item.installment.total}x
-                  </span>
-                )}
-              </div>
-              <p style={{ fontSize: 12, color: T.muted, margin: "2px 0 0" }}>{fmt(item.amount)}/mês</p>
-            </div>
-            <button onClick={() => toggle(item.id)}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
-                background: item.status === "Pago" ? "#dcfce7" : "#fef3c7",
-                color: item.status === "Pago" ? "#16a34a" : "#d97706" }}>
-              {item.status === "Pago" ? <CheckCircle2 size={13} /> : <Clock size={13} />}
-              {item.status}
-            </button>
-            <button onClick={() => remove(item.id)} style={{ background: "none", border: "none", cursor: "pointer", color: T.muted, marginLeft: 12 }}>
-              <Trash2 size={15} />
-            </button>
-          </motion.div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Investments & Goals Tab ───────────────────────────────────────────────────
-function InvestmentsTab({ goals, setGoals }) {
-  const [assets] = useState([
-    { name: "Tesouro Selic 2029", type: "Renda Fixa", amount: 12500, return: 2.4 },
-    { name: "PETR4", type: "Ações", amount: 3200, return: -1.2 },
-    { name: "MXRF11", type: "FIIs", amount: 5800, return: 0.9 },
-    { name: "BTC", type: "Cripto", amount: 2100, return: 8.3 },
-  ]);
-  const [goalForm, setGoalForm] = useState({ name: "", target: "", current: "", color: "#7BCB68" });
-
-  const addGoal = () => {
-    if (!goalForm.name || !goalForm.target) return;
-    const updated = [...goals, { id: Date.now(), ...goalForm, target: parseFloat(goalForm.target), current: parseFloat(goalForm.current) || 0 }];
-    setGoals(updated);
-    LS.set("fin_goals", updated);
-    setGoalForm({ name: "", target: "", current: "", color: "#7BCB68" });
-  };
-
-  const updateGoal = (id, delta) => {
-    const updated = goals.map(g => g.id === id ? { ...g, current: Math.min(g.current + delta, g.target) } : g);
-    setGoals(updated);
-    LS.set("fin_goals", updated);
-  };
-
-  const removeGoal = (id) => {
-    const updated = goals.filter(g => g.id !== id);
-    setGoals(updated);
-    LS.set("fin_goals", updated);
-  };
-
-  const totalInvested = assets.reduce((a, i) => a + i.amount, 0);
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-      <div style={{ background: T.card, borderRadius: 24, padding: 24, boxShadow: cardShadow }}>
-        <h3 style={{ fontSize: 16, fontWeight: 800, color: T.text, marginBottom: 6 }}>Portfólio</h3>
-        <p style={{ fontSize: 28, fontWeight: 800, color: T.accent, marginBottom: 20 }}>{fmt(totalInvested)}</p>
-        {assets.map((a, i) => (
-          <div key={i} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <p style={{ fontWeight: 700, fontSize: 13, color: T.text, margin: 0 }}>{a.name}</p>
-              <span style={{ fontSize: 11, background: T.bg, padding: "2px 8px", borderRadius: 8, color: T.muted }}>{a.type}</span>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <p style={{ fontWeight: 700, fontSize: 14, color: T.text, margin: 0 }}>{fmt(a.amount)}</p>
-              <p style={{ fontSize: 12, color: a.return >= 0 ? T.accent : T.danger, margin: 0, fontWeight: 600 }}>
-                {a.return >= 0 ? "+" : ""}{a.return}%
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <div style={{ background: T.card, borderRadius: 24, padding: 24, boxShadow: cardShadow, marginBottom: 16 }}>
-          <h4 style={{ fontWeight: 700, fontSize: 15, color: T.text, marginBottom: 14 }}>Nova Meta</h4>
-          {[{ l: "Nome", k: "name", p: "Ex: Reserva" }, { l: "Objetivo (R$)", k: "target", p: "30000" }, { l: "Atual (R$)", k: "current", p: "0" }].map(f => (
-            <div key={f.k} style={{ marginBottom: 10 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 4 }}>{f.l}</label>
-              <input value={goalForm[f.k]} onChange={e => setGoalForm(p => ({ ...p, [f.k]: e.target.value }))} placeholder={f.p}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }} />
-            </div>
-          ))}
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 4 }}>Cor</label>
-            <input type="color" value={goalForm.color} onChange={e => setGoalForm(p => ({ ...p, color: e.target.value }))}
-              style={{ width: "100%", height: 38, borderRadius: 12, border: `1.5px solid ${T.border}`, cursor: "pointer" }} />
-          </div>
-          <button onClick={addGoal}
-            style={{ width: "100%", padding: "12px", borderRadius: 14, background: T.accent, color: "#fff", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer" }}>
-            Criar Meta
-          </button>
-        </div>
-
-        <div style={{ background: T.card, borderRadius: 24, padding: 24, boxShadow: cardShadow }}>
-          <h3 style={{ fontSize: 16, fontWeight: 800, color: T.text, marginBottom: 16 }}>Metas</h3>
-          {goals.map(g => (
-            <div key={g.id} style={{ marginBottom: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: g.color }} />
-                  <span style={{ fontWeight: 700, fontSize: 13, color: T.text }}>{g.name}</span>
-                </div>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <span style={{ fontSize: 12, color: T.muted }}>{fmt(g.current)} / {fmt(g.target)}</span>
-                  <button onClick={() => updateGoal(g.id, 100)} style={{ background: T.accent, border: "none", borderRadius: 6, color: "#fff", fontSize: 12, padding: "2px 7px", cursor: "pointer" }}>+R$100</button>
-                  <button onClick={() => removeGoal(g.id)} style={{ background: "none", border: "none", cursor: "pointer", color: T.muted }}><X size={14} /></button>
-                </div>
-              </div>
-              <div style={{ height: 8, background: T.bg, borderRadius: 4 }}>
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${Math.min((g.current / g.target) * 100, 100)}%` }}
-                  transition={{ duration: 0.8, ease: "easeOut" }}
-                  style={{ height: "100%", background: g.color, borderRadius: 4 }}
-                />
-              </div>
-              <p style={{ fontSize: 11, color: T.muted, margin: "4px 0 0", textAlign: "right" }}>
-                {Math.round((g.current / g.target) * 100)}% concluído
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── AI Chat Tab ───────────────────────────────────────────────────────────────
-function AITab({ transactions, goals }) {
-  const [messages, setMessages] = useState([
-    { role: "assistant", text: "Olá! Sou seu assistente financeiro. Posso analisar suas finanças e dar conselhos personalizados. Como posso ajudar?" }
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const endRef = useRef(null);
-
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+function DashboardTab({ transactions, cards, accent, searchQuery }) {
+  const T = makeTheme(accent);
+  const [activeCardIdx, setActiveCardIdx] = useState(0);
+  const activeCard = cards[activeCardIdx] || cards[0];
 
   const balance = transactions.reduce((a, t) => a + t.amount, 0);
   const income = transactions.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0);
   const expenses = transactions.filter(t => t.amount < 0).reduce((a, t) => a + Math.abs(t.amount), 0);
+
   const catMap = {};
   transactions.filter(t => t.amount < 0).forEach(t => { catMap[t.category] = (catMap[t.category] || 0) + Math.abs(t.amount); });
-  const topCat = Object.entries(catMap).sort((a, b) => b[1] - a[1])[0];
+  const donutData = Object.entries(catMap).map(([name, value]) => ({ name, value }));
 
-  const send = async () => {
-    if (!input.trim() || loading) return;
-    const userMsg = input.trim();
-    setInput("");
-    setMessages(m => [...m, { role: "user", text: userMsg }]);
-    setLoading(true);
+  const weekData = WEEK.map((d, i) => {
+    const dayTx = transactions.filter(t => new Date(t.date).getDay() === i);
+    return { name: d, entradas: dayTx.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0), saidas: dayTx.filter(t => t.amount < 0).reduce((a, t) => a + Math.abs(t.amount), 0) };
+  });
 
-    const context = `Dados financeiros do usuário:
-- Saldo atual: ${fmt(balance)}
-- Total entradas: ${fmt(income)}
-- Total saídas: ${fmt(expenses)}
-- Categoria com mais gastos: ${topCat ? `${topCat[0]} (${fmt(topCat[1])})` : "N/A"}
-- Número de metas: ${goals.length}
-- Metas em andamento: ${goals.map(g => `${g.name}: ${Math.round((g.current / g.target) * 100)}%`).join(", ")}
-
-Responda em português brasileiro, de forma concisa, amigável e com emojis ocasionais. Dê conselhos práticos baseados nesses dados quando relevante.`;
-
-    try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: context,
-          messages: [
-            ...messages.filter(m => m.role !== "assistant" || messages.indexOf(m) > 0).map(m => ({ role: m.role, content: m.text })),
-            { role: "user", content: userMsg }
-          ]
-        })
-      });
-      const data = await response.json();
-      const reply = data.content?.[0]?.text || "Desculpe, não consegui responder agora.";
-      setMessages(m => [...m, { role: "assistant", text: reply }]);
-    } catch {
-      setMessages(m => [...m, { role: "assistant", text: "Erro ao conectar com a IA. Tente novamente." }]);
-    }
-    setLoading(false);
-  };
-
-  const quickActions = [
-    "Como está minha saúde financeira?",
-    "Onde posso economizar?",
-    "Como atingir minhas metas mais rápido?",
-    "Analise meus gastos este mês",
-  ];
+  const recent = searchQuery
+    ? transactions.filter(t => t.name.toLowerCase().includes(searchQuery.toLowerCase()) || t.category.toLowerCase().includes(searchQuery.toLowerCase()))
+    : transactions.slice(0, 8);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 20, height: "calc(100vh - 140px)" }}>
-      <div style={{ background: T.card, borderRadius: 24, boxShadow: cardShadow, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <div style={{ padding: "20px 24px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 40, height: 40, borderRadius: "50%", background: T.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Bot size={20} color="#fff" />
-          </div>
-          <div>
-            <p style={{ fontWeight: 700, fontSize: 15, color: T.text, margin: 0 }}>Assistente Financeiro IA</p>
-            <p style={{ fontSize: 12, color: T.accent, margin: 0 }}>● Online</p>
-          </div>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-          {messages.map((m, i) => (
-            <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-              style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-              <div style={{
-                maxWidth: "72%", padding: "12px 16px", borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-                background: m.role === "user" ? T.accent : T.bg,
-                color: m.role === "user" ? "#fff" : T.text,
-                fontSize: 14, lineHeight: 1.5, whiteSpace: "pre-wrap"
-              }}>
-                {m.text}
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 20 }}>
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
+            <div>
+              <p style={{ color: T.muted, fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Saldo Disponível</p>
+              <h1 style={{ fontSize: 38, fontWeight: 800, color: T.text, margin: "0 0 4px" }}>{fmt(balance)}</h1>
+              <div style={{ display: "flex", gap: 20, marginTop: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 30, height: 30, borderRadius: "50%", border: `3px solid ${T.accent}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: T.accent }} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, color: T.muted, margin: 0 }}>Saldo Cartão</p>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0 }}>{activeCard ? fmt(activeCard.balance) : "—"}</p>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 30, height: 30, borderRadius: "50%", border: `2px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: T.muted }} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, color: T.muted, margin: 0 }}>Limite</p>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0 }}>{activeCard ? fmt(activeCard.limit) : "—"}</p>
+                  </div>
+                </div>
               </div>
-            </motion.div>
-          ))}
-          {loading && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ display: "flex", gap: 4, alignItems: "center", padding: "8px 16px" }}>
-              {[0, 1, 2].map(i => (
-                <motion.div key={i} animate={{ y: [0, -6, 0] }} transition={{ repeat: Infinity, delay: i * 0.15, duration: 0.6 }}
-                  style={{ width: 8, height: 8, borderRadius: "50%", background: T.accent }} />
+            </div>
+            {activeCard && <PhysicalCard card={activeCard} />}
+          </div>
+          {cards.length > 1 && (
+            <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+              {cards.map((c, i) => (
+                <PhysicalCard key={c.id} card={c} compact selected={i === activeCardIdx} onClick={() => setActiveCardIdx(i)} />
               ))}
-            </motion.div>
+            </div>
           )}
-          <div ref={endRef} />
-        </div>
+        </Card>
 
-        <div style={{ padding: "16px 24px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 10 }}>
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && send()}
-            placeholder="Pergunte algo sobre suas finanças..."
-            style={{ flex: 1, padding: "12px 16px", borderRadius: 16, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none" }}
-          />
-          <button onClick={send} disabled={loading}
-            style={{ width: 46, height: 46, borderRadius: "50%", background: T.accent, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Send size={18} color="#fff" />
-          </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ background: T.accent, borderRadius: 24, padding: "20px 22px", boxShadow: T.shadow, flex: 1 }}>
+            <p style={{ color: "rgba(255,255,255,0.75)", fontSize: 12, marginBottom: 4 }}>Entradas</p>
+            <p style={{ color: "#fff", fontSize: 22, fontWeight: 800, margin: 0 }}>{fmt(income)}</p>
+          </div>
+          <div style={{ background: "#1D1D1D", borderRadius: 24, padding: "20px 22px", boxShadow: T.shadow, flex: 1 }}>
+            <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 12, marginBottom: 4 }}>Saídas</p>
+            <p style={{ color: "#fff", fontSize: 22, fontWeight: 800, margin: 0 }}>{fmt(expenses)}</p>
+          </div>
         </div>
       </div>
 
-      <div>
-        <div style={{ background: T.card, borderRadius: 24, padding: 20, boxShadow: cardShadow, marginBottom: 16 }}>
-          <p style={{ fontWeight: 700, fontSize: 14, color: T.text, marginBottom: 12 }}>Ações Rápidas</p>
-          {quickActions.map((q, i) => (
-            <button key={i} onClick={() => { setInput(q); }}
-              style={{ width: "100%", textAlign: "left", padding: "10px 12px", borderRadius: 12, border: `1px solid ${T.border}`, background: T.bg, color: T.text, fontSize: 12, cursor: "pointer", marginBottom: 8, fontWeight: 500 }}>
-              {q}
-            </button>
-          ))}
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        <Card style={{ display: "flex", flexDirection: "column" }}>
+          <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 16 }}>Resumo de Gastos por Categoria</p>
+          <div style={{ flex: 1, minHeight: 200, position: "relative" }}>
+            <ResponsiveContainer width="99%" height={240}>
+              <PieChart>
+                <Pie data={donutData} innerRadius={60} outerRadius={85} paddingAngle={4} dataKey="value">
+                  {donutData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v) => fmt(v)} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
 
-        <div style={{ background: T.card, borderRadius: 24, padding: 20, boxShadow: cardShadow }}>
-          <p style={{ fontWeight: 700, fontSize: 14, color: T.text, marginBottom: 12 }}>Resumo Financeiro</p>
-          <div style={{ marginBottom: 10 }}>
-            <p style={{ fontSize: 11, color: T.muted, margin: "0 0 2px" }}>Saldo Atual</p>
-            <p style={{ fontSize: 18, fontWeight: 800, color: balance >= 0 ? T.accent : T.danger, margin: 0 }}>{fmt(balance)}</p>
+        <Card style={{ display: "flex", flexDirection: "column" }}>
+          <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 16 }}>Fluxo de Caixa Semanal</p>
+          <div style={{ flex: 1, minHeight: 200 }}>
+            <ResponsiveContainer width="99%" height={240}>
+              <BarChart data={weekData}>
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: T.muted }} />
+                <YAxis hide />
+                <Tooltip formatter={(v) => fmt(v)} />
+                <Bar dataKey="entradas" fill={T.accent} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="saidas" fill="#F87171" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-          <div style={{ marginBottom: 10 }}>
-            <p style={{ fontSize: 11, color: T.muted, margin: "0 0 2px" }}>Entradas</p>
-            <p style={{ fontSize: 14, fontWeight: 700, color: T.accent, margin: 0 }}>+{fmt(income)}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: 11, color: T.muted, margin: "0 0 2px" }}>Saídas</p>
-            <p style={{ fontSize: 14, fontWeight: 700, color: T.danger, margin: 0 }}>-{fmt(expenses)}</p>
-          </div>
+        </Card>
+      </div>
+
+      <Card>
+        <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 14 }}>{searchQuery ? "Resultados da busca global" : "Transações Recentes"}</p>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 500 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${T.border}`, textAlign: "left" }}>
+                <th style={{ padding: "8px 12px", fontSize: 11, color: T.muted, fontWeight: 700 }}>Nome</th>
+                <th style={{ padding: "8px 12px", fontSize: 11, color: T.muted, fontWeight: 700 }}>Categoria</th>
+                <th style={{ padding: "8px 12px", fontSize: 11, color: T.muted, fontWeight: 700 }}>Banco / Meio</th>
+                <th style={{ padding: "8px 12px", fontSize: 11, color: T.muted, fontWeight: 700 }}>Data</th>
+                <th style={{ padding: "8px 12px", fontSize: 11, color: T.muted, fontWeight: 700, textAlign: "right" }}>Quantia</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recent.length === 0 && (
+                <tr><td colSpan={5} style={{ padding: 24, textAllign: "center", fontSize: 13, color: T.muted }}>Nenhuma transação encontrada.</td></tr>
+              )}
+              {recent.map(t => (
+                <tr key={t.id} style={{ borderBottom: "1px solid rgba(0,0,0,0.02)" }}>
+                  <td style={{ padding: "12px", fontSize: 13, fontWeight: 700, color: T.text }}>{t.name}</td>
+                  <td style={{ padding: "12px", fontSize: 12 }}><Badge>{t.category}</Badge></td>
+                  <td style={{ padding: "12px", fontSize: 12, color: T.muted }}>{t.bank || "—"} • {t.payment || "—"}</td>
+                  <td style={{ padding: "12px", fontSize: 12, color: T.muted }}>{fmtDate(t.date)}</td>
+                  <td style={{ padding: "12px", fontSize: 13, fontWeight: 700, textAlign: "right", color: t.amount > 0 ? T.accent : T.text }}>
+                    {t.amount > 0 ? `+ ${fmt(t.amount)}` : fmt(t.amount)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Tabs Modules Placeholder Interfaces ─────────────────────────────────────
+function TransactionsTab({ transactions, setTransactions, cards, accent }) {
+  const T = makeTheme(accent);
+  const [fCat, setFCat] = useState("Todos");
+  const [fBank, setFBank] = useState("Todos");
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [cat, setCat] = useState("Alimentação");
+  const [pay, setPay] = useState("Pix");
+  const [bank, setBank] = useState("Nubank");
+
+  const filtered = useMemo(() => {
+    return transactions.filter(t => {
+      const matchCat = fCat === "Todos" || t.category === fCat;
+      const matchBank = fBank === "Todos" || t.bank === fBank;
+      return matchCat && matchBank;
+    });
+  }, [transactions, fCat, fBank]);
+
+  const add = (e) => {
+    e.preventDefault();
+    if (!name || !amount) return;
+    const isIncome = cat === "Receitas";
+    const num = Math.abs(parseFloat(amount)) * (isIncome ? 1 : -1);
+    const newTx = { id: Date.now(), name, amount: num, category: cat, date: new Date().toISOString(), payment: pay, bank };
+    setTransactions([newTx, ...transactions]);
+    setName(""); setAmount("");
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
+      <Card>
+        <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 16 }}>Lançar Transação</p>
+        <form onSubmit={add}>
+          <FInput label="Nome" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Mercado Livre" />
+          <FInput label="Valor (R$)" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+          <FSelect label="Categoria" value={cat} onChange={e => setCat(e.target.value)} options={CATS} />
+          <FSelect label="Meio de Pagamento" value={pay} onChange={e => setPay(e.target.value)} options={PAYMENTS} />
+          <FSelect label="Banco" value={bank} onChange={e => setBank(e.target.value)} options={["Nubank", "Itaú", "Bradesco", "Santander", "Outros"]} />
+          <Btn full accent={T.accent} style={{ marginTop: 8 }}><Plus size={15} /> Adicionar</Btn>
+        </form>
+      </Card>
+      <Card style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <FSelect label="Filtro Categoria" value={fCat} onChange={e => setFCat(e.target.value)} options={["Todos", ...CATS]} style={{ marginBottom: 0 }} />
+          <FSelect label="Filtro Banco" value={fBank} onChange={e => setFBank(e.target.value)} options={["Todos", "Nubank", "Itaú", "Bradesco", "Santander"]} style={{ marginBottom: 0 }} />
+        </div>
+        <div style={{ overflowY: "auto", flex: 1, maxHeight: 400 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              {filtered.map(t => (
+                <tr key={t.id} style={{ borderBottom: "1px solid rgba(0,0,0,0.02)" }}>
+                  <td style={{ padding: 10, fontSize: 13, fontWeight: 700 }}>{t.name}</td>
+                  <td style={{ padding: 10 }}><Badge>{t.category}</Badge></td>
+                  <td style={{ padding: 10, fontSize: 12, color: T.muted }}>{t.bank} • {t.payment}</td>
+                  <td style={{ padding: 10, fontSize: 13, fontWeight: 700, textAlign: "right", color: t.amount > 0 ? T.accent : T.text }}>{fmt(t.amount)}</td>
+                  <td style={{ padding: 10, textAlign: "right" }}>
+                    <button onClick={() => setTransactions(transactions.filter(item => item.id !== t.id))} style={{ background: "none", border: "none", cursor: "pointer", color: T.danger }}><Trash2 size={14} /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function CardsTab({ cards, setCards, accent }) {
+  const T = makeTheme(accent);
+  const [bank, setBank] = useState("");
+  const [num, setNum] = useState("");
+  const [lim, setLim] = useState("");
+  const [bal, setBal] = useState("");
+  const [due, setDue] = useState("");
+  const [color, setColor] = useState("#7BCB68");
+  const [editId, setEditId] = useState(null);
+
+  const save = (e) => {
+    e.preventDefault();
+    if (!bank || !num) return;
+    if (editId) {
+      setCards(cards.map(c => c.id === editId ? { ...c, bank, number: num, limit: Number(lim), balance: Number(bal), due, color } : c));
+      setEditId(null);
+    } else {
+      setCards([...cards, { id: Date.now(), bank, number: num, limit: Number(lim), balance: Number(bal), due, color }]);
+    }
+    setBank(""); setNum(""); setLim(""); setBal(""); setDue("");
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
+      <Card>
+        <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 16 }}>{editId ? "Editar Cartão" : "Cadastrar Cartão"}</p>
+        <form onSubmit={save}>
+          <FInput label="Banco" value={bank} onChange={e => setBank(e.target.value)} placeholder="Nubank" />
+          <FInput label="Número do Cartão" value={num} onChange={e => setNum(e.target.value)} placeholder="0000 0000 0000 0000" />
+          <FInput label="Limite (R$)" type="number" value={lim} onChange={e => setLim(e.target.value)} placeholder="5000" />
+          <FInput label="Saldo Utilizado (R$)" type="number" value={bal} onChange={e => setBal(e.target.value)} placeholder="0" />
+          <FInput label="Vencimento" value={due} onChange={e => setDue(e.target.value)} placeholder="10/29" />
+          <FInput label="Cor do Cartão" type="color" value={color} onChange={e => setColor(e.target.value)} style={{ padding: 4, height: 38 }} />
+          <Btn full accent={T.accent}>{editId ? "Salvar Alterações" : "Adicionar Cartão"}</Btn>
+        </form>
+      </Card>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+        {cards.map(c => (
+          <div key={c.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <PhysicalCard card={c} />
+            <div style={{ display: "flex", gap: 6 }}>
+              <Btn small variant="ghost" accent={T.accent} onClick={() => { setEditId(c.id); setBank(c.bank); setNum(c.number); setLim(c.limit); setBal(c.balance); setDue(c.due); setColor(c.color); }}><Edit2 size={12} /> Editar</Btn>
+              <Btn small variant="danger" onClick={() => setCards(cards.filter(item => item.id !== c.id))}><Trash2 size={12} /></Btn>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-// ─── Settings Tab ──────────────────────────────────────────────────────────────
-function SettingsTab({ username, setUsername, setFont }) {
-  const [newUser, setNewUser] = useState(username);
-  const [oldPass, setOldPass] = useState("");
-  const [newPass, setNewPass] = useState("");
-  const [passMsg, setPassMsg] = useState("");
-  const [userMsg, setUserMsg] = useState("");
-  const fonts = ["Inter", "Roboto", "Poppins", "Nunito", "DM Sans"];
-  const [selectedFont, setSelectedFont] = useState(LS.get("fin_font", "Inter"));
+function FixedTab({ fixed, setFixed, accent }) {
+  const T = makeTheme(accent);
+  const [fMonth, setFMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
 
-  const saveUser = () => {
-    LS.set("fin_username", newUser);
-    setUsername(newUser);
-    setUserMsg("Usuário atualizado!");
-    setTimeout(() => setUserMsg(""), 2000);
+  const filtered = useMemo(() => fixed.filter(f => !f.month || f.month === fMonth), [fixed, fMonth]);
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
+      <Card>
+        <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 16 }}>Nova Despesa Fixa</p>
+        <form onSubmit={e => { e.preventDefault(); if(!name || !amount) return; setFixed([...fixed, { id: Date.now(), name, amount: Number(amount), status: "Pendente", installment: null, month: fMonth }]); setName(""); setAmount(""); }}>
+          <FInput label="Nome da Conta" value={name} onChange={e => setName(e.target.value)} placeholder="Internet" />
+          <FInput label="Valor Mensal (R$)" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="150" />
+          <Btn full accent={T.accent}>Adicionar</Btn>
+        </form>
+      </Card>
+      <Card style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", justify: "space-between", items: "center" }}>
+          <p style={{ fontSize: 15, fontWeight: 800, color: T.text, margin: 0 }}>Controle Mensal</p>
+          <FInput type="month" value={fMonth} onChange={e => setFMonth(e.target.value)} style={{ marginBottom: 0, padding: "6px 12px" }} />
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <tbody>
+            {filtered.map(f => (
+              <tr key={f.id} style={{ borderBottom: "1px solid rgba(0,0,0,0.02)" }}>
+                <td style={{ padding: 10, fontSize: 13, fontWeight: 700 }}>{f.name}</td>
+                <td style={{ padding: 10, fontSize: 13 }}>{fmt(f.amount)}</td>
+                <td style={{ padding: 10 }}>
+                  <button onClick={() => setFixed(fixed.map(item => item.id === f.id ? { ...item, status: item.status === "Pago" ? "Pendente" : "Pago" } : item))}
+                    style={{ background: "none", border: "none", cursor: "pointer" }}>
+                    <Badge color={f.status === "Pago" ? T.accent : T.warn} bg={f.status === "Pago" ? "#E8F5E9" : "#FFF3E0"}>{f.status}</Badge>
+                  </button>
+                </td>
+                <td style={{ padding: 10, textAlign: "right" }}>
+                  <button onClick={() => setFixed(fixed.filter(item => item.id !== f.id))} style={{ background: "none", border: "none", cursor: "pointer", color: T.danger }}><Trash2 size={14} /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
+function InvoicesTab({ invoices, setInvoices, accent, searchQuery }) {
+  const T = makeTheme(accent);
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState("");
+
+  const filtered = useMemo(() => {
+    if (!searchQuery) return invoices;
+    return invoices.filter(i => i.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [invoices, searchQuery]);
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
+      <Card>
+        <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 16 }}>Lançar Fatura Avulsa</p>
+        <form onSubmit={e => { e.preventDefault(); if(!name || !amount || !date) return; setInvoices([...invoices, { id: Date.now(), name, amount: Number(amount), dueDate: date, status: "Pendente" }]); setName(""); setAmount(""); setDate(""); }}>
+          <FInput label="Descrição" value={name} onChange={e => setName(e.target.value)} placeholder="Adobe" />
+          <FInput label="Valor" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+          <FInput label="Vencimento" type="date" value={date} onChange={e => setDate(e.target.value)} />
+          <Btn full accent={T.accent}>Agendar Lembrete</Btn>
+        </form>
+        <div style={{ marginTop: 14, padding: 12, background: T.bg, borderRadius: 12, display: "flex", gap: 8, items: "center" }}>
+          <Calendar size={16} color={T.accent} />
+          <span style={{ fontSize: 11, fontWeight: 600, color: T.text }}>Sincronizado com Google Agenda</span>
+        </div>
+      </Card>
+      <Card>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${T.border}`, textAlign: "left" }}>
+              <th style={{ padding: 10, fontSize: 11, color: T.muted }}>Nome</th>
+              <th style={{ padding: 10, fontSize: 11, color: T.muted }}>Vencimento</th>
+              <th style={{ padding: 10, fontSize: 11, color: T.muted }}>Valor</th>
+              <th style={{ padding: 10, fontSize: 11, color: T.muted }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(i => (
+              <tr key={i.id} style={{ borderBottom: "1px solid rgba(0,0,0,0.02)" }}>
+                <td style={{ padding: 10, fontSize: 13, fontWeight: 700 }}>{i.name}</td>
+                <td style={{ padding: 10, fontSize: 12, color: T.muted }}>{fmtDate(i.dueDate)}</td>
+                <td style={{ padding: 10, fontSize: 13, fontWeight: 700 }}>{fmt(i.amount)}</td>
+                <td style={{ padding: 10 }}>
+                  <button onClick={() => setInvoices(invoices.map(item => item.id === i.id ? { ...item, status: item.status === "Pago" ? "Pendente" : "Pago" } : item))} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                    <Badge color={i.status === "Pago" ? T.accent : T.danger} bg={i.status === "Pago" ? "#E8F5E9" : "#FFEBEE"}>{i.status}</Badge>
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
+function InvestmentsTab({ goals, setGoals, assets, setAssets, accent }) {
+  const T = makeTheme(accent);
+  const [aName, setAName] = useState("");
+  const [aType, setAType] = useState("Renda Fixa");
+  const [aAmount, setAAmount] = useState("");
+  const [editAssetId, setEditAssetId] = useState(null);
+
+  const saveAsset = (e) => {
+    e.preventDefault();
+    if (!aName || !aAmount) return;
+    if (editAssetId) {
+      setAssets(assets.map(a => a.id === editAssetId ? { ...a, name: aName, type: aType, amount: Number(aAmount) } : a));
+      setEditAssetId(null);
+    } else {
+      setAssets([...assets, { id: Date.now(), name: aName, type: aType, amount: Number(aAmount), cdiMult: 1.0, manualReturn: 0, purchaseDate: new Date().toISOString().slice(0,10) }]);
+    }
+    setAName(""); setAAmount("");
   };
 
-  const savePass = () => {
-    const stored = LS.get("fin_password", "1234");
-    if (oldPass !== stored) { setPassMsg("Senha atual incorreta."); return; }
-    LS.set("fin_password", newPass);
-    setOldPass(""); setNewPass("");
-    setPassMsg("Senha alterada com sucesso!");
-    setTimeout(() => setPassMsg(""), 2000);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
+        <Card>
+          <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 16 }}>{editAssetId ? "Editar Ativo" : "Lançar Investimento"}</p>
+          <form onSubmit={saveAsset}>
+            <FInput label="Nome do Ativo / Ticket" value={aName} onChange={e => setAName(e.target.value)} placeholder="Ex: CDB Nubank ou PETR4" />
+            <FSelect label="Tipo de Ativo" value={aType} onChange={e => setAType(e.target.value)} options={ASSET_TYPES} />
+            <FInput label="Valor Alocado (R$)" type="number" value={aAmount} onChange={e => setAAmount(e.target.value)} placeholder="0.00" />
+            <Btn full accent={T.accent}>{editAssetId ? "Salvar" : "Alocar Capital"}</Btn>
+          </form>
+        </Card>
+        <Card>
+          <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 12 }}>Carteira de Ativos (Rendimento Simulado CDI)</p>
+          <div style={{ overflowY: "auto", maxHeight: 260 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <tbody>
+                {assets.map(a => (
+                  <tr key={a.id} style={{ borderBottom: "1px solid rgba(0,0,0,0.02)" }}>
+                    <td style={{ padding: 10, fontSize: 13, fontWeight: 700 }}>{a.name}</td>
+                    <td style={{ padding: 10 }}><Badge color="#60a5fa" bg="#eff6ff">{a.type}</Badge></td>
+                    <td style={{ padding: 10, fontSize: 13, fontWeight: 700 }}>{fmt(a.amount)}</td>
+                    <td style={{ padding: 10, fontSize: 11, color: T.accent }}>~10,75% AA</td>
+                    <td style={{ padding: 10, display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                      <button onClick={() => { setEditAssetId(a.id); setAName(a.name); setAType(a.type); setAAmount(a.amount); }} style={{ background: "none", border: "none", color: T.accent, cursor: "pointer" }}><Edit2 size={13} /></button>
+                      <button onClick={() => setAssets(assets.filter(item => item.id !== a.id))} style={{ background: "none", border: "none", color: T.danger, cursor: "pointer" }}><Trash2 size={13} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+      <Card>
+        <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 16 }}>Metas Financeiras</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+          {goals.map(g => {
+            const pct = Math.min(100, Math.round((g.current / g.target) * 100));
+            return (
+              <div key={g.id} style={{ border: `1.5px solid ${T.border}`, padding: 16, borderRadius: 18, background: T.bg }}>
+                <div style={{ display: "flex", justify: "space-between", items: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>{g.name}</span>
+                  <button onClick={() => setGoals(goals.filter(item => item.id !== g.id))} style={{ background: "none", border: "none", color: T.danger, cursor: "pointer" }}><X size={12} /></button>
+                </div>
+                <div style={{ width: "100%", height: 6, background: "rgba(0,0,0,0.05)", borderRadius: 3, marginBottom: 8, overflow: "hidden" }}>
+                  <div style={{ width: `${pct}%`, height: "100%", background: g.color }} />
+                </div>
+                <div style={{ display: "flex", justify: "space-between", fontSize: 11, color: T.muted }}>
+                  <span>{pct}% Concluído</span>
+                  <span style={{ fontWeight: 700, color: T.text }}>{fmt(g.current)} / {fmt(g.target)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function AITab({ transactions, goals, invoices, accent }) {
+  const T = makeTheme(accent);
+  const [chatMessages, setChatMessages] = useState([
+    { sender: "bot", text: "Olá! Sou o seu Assistente IA. Analisei as suas finanças. Como posso ajudar você hoje?" }
+  ]);
+  const [chatInput, setChatInput] = useState("");
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    const userMsg = chatInput;
+    setChatMessages(prev => [...prev, { sender: "user", text: userMsg }]);
+    setChatInput("");
+
+    setTimeout(() => {
+      const balance = transactions.reduce((a, t) => a + t.amount, 0);
+      const pendingInvoices = invoices.filter(i => i.status !== "Pago").reduce((a, i) => a + i.amount, 0);
+      let reply = "Percebi que o seu fluxo de transações está regular. Recomendo manter uma reserva equivalente a 6 meses das suas despesas.";
+      if (balance < pendingInvoices) {
+        reply = `Atenção: O seu saldo atual total (${fmt(balance)}) é menor do que a soma das suas faturas pendentes (${fmt(pendingInvoices)}). Sugiro adiar gastos supérfluos.`;
+      } else if (goals.length > 0) {
+        reply = `O seu saldo está saudável! Que tal destinar uma parte para a meta '${goals[0].name}'? Faltam alguns aportes para concluir!`;
+      }
+      setChatMessages(prev => [...prev, { sender: "bot", text: reply }]);
+    }, 750);
   };
 
-  const applyFont = (f) => {
-    setSelectedFont(f);
-    setFont(f);
-    LS.set("fin_font", f);
+  return (
+    <Card style={{ maxWidth: 700, margin: "0 auto" }}>
+      <p style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 14 }}>Central de Ajuda Inteligente (IA)</p>
+      <div style={{ height: 320, background: T.bg, borderRadius: 16, padding: 14, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, border: `1.5px solid ${T.border}` }}>
+        {chatMessages.map((msg, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: msg.sender === "user" ? "flex-end" : "flex-start" }}>
+            <div style={{ background: msg.sender === "user" ? T.accent : T.card, color: msg.sender === "user" ? "#fff" : T.text, padding: "10px 14px", borderRadius: 14, fontSize: 13, maxWidth: "80%", boxShadow: "0 2px 6px rgba(0,0,0,0.02)", fontWeight: 500 }}>
+              {msg.text}
+            </div>
+          </div>
+        ))}
+      </div>
+      <form onSubmit={handleSendMessage} style={{ display: "flex", gap: 10, marginTop: 14 }}>
+        <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Diga: Como está o meu saldo?"
+          style={{ flex: 1, padding: "11px 14px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, outline: "none", background: T.bg, color: T.text }} />
+        <Btn onClick={handleSendMessage} accent={T.accent}><Send size={14} /></Btn>
+      </form>
+    </Card>
+  );
+}
+
+function SettingsTab({ profile, profiles, setProfiles, setCurrentProfile, onLogout, accent, setAccent, font, setFont, allData }) {
+  const T = makeTheme(accent);
+  const [newProfileName, setNewProfileName] = useState("");
+
+  const handleCreateProfile = () => {
+    if (!newProfileName.trim()) return;
+    const p = { id: Date.now(), name: newProfileName.trim(), password: "1234", avatar: null };
+    setProfiles([...profiles, p]);
+    setNewProfileName("");
   };
 
-  const backupJSON = () => {
-    const data = {
-      transactions: LS.get("fin_transactions", []),
-      cards: LS.get("fin_cards", SEED_CARDS),
-      fixed: LS.get("fin_fixed", SEED_FIXED),
-      goals: LS.get("fin_goals", SEED_GOALS),
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "finance-backup.json"; a.click();
+  const switchProfile = (pid) => {
+    const p = profiles.find(item => item.id === pid);
+    if (p) setCurrentProfile(p);
   };
 
-  const fakeGDrive = () => alert("Simulação: Backup enviado para o Google Drive com sucesso! ✅");
+  const downloadData = (format) => {
+    let dataStr = "";
+    let filename = `backup_${profile?.name || "user"}`;
+    if (format === "json") {
+      dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(allData, null, 2));
+      filename += ".json";
+    } else {
+      const csvRows = ["Modulo,Nome/Descricao,Valor/Quantia,Status/Categoria"];
+      allData.transactions.forEach(t => csvRows.push(`Transacao,${t.name},${t.amount},${t.category}`));
+      allData.invoices.forEach(i => csvRows.push(`Fatura,${i.name},${i.amount},${i.status}`));
+      dataStr = "data:text/csv;charset=utf-8," + encodeURIComponent(csvRows.join("\n"));
+      filename += ".csv";
+    }
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", filename);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-      <div style={{ background: T.card, borderRadius: 24, padding: 28, boxShadow: cardShadow }}>
-        <h3 style={{ fontSize: 16, fontWeight: 800, color: T.text, marginBottom: 20 }}>Perfil</h3>
-        <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 6 }}>Nome de Usuário</label>
-        <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
-          <input value={newUser} onChange={e => setNewUser(e.target.value)}
-            style={{ flex: 1, padding: "11px 14px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none" }} />
-          <button onClick={saveUser}
-            style={{ padding: "11px 18px", borderRadius: 12, background: T.accent, color: "#fff", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-            <Save size={14} /> Salvar
-          </button>
-        </div>
-        {userMsg && <p style={{ fontSize: 12, color: T.accent, margin: 0 }}>{userMsg}</p>}
-
-        <hr style={{ border: "none", borderTop: `1px solid ${T.border}`, margin: "24px 0" }} />
-
-        <h4 style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 14 }}>Alterar Senha</h4>
-        {[{ l: "Senha Atual", v: oldPass, set: setOldPass }, { l: "Nova Senha", v: newPass, set: setNewPass }].map((f, i) => (
-          <div key={i} style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 5 }}>{f.l}</label>
-            <input type="password" value={f.v} onChange={e => f.set(e.target.value)}
-              style={{ width: "100%", padding: "11px 14px", borderRadius: 12, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", boxSizing: "border-box" }} />
-          </div>
-        ))}
-        <button onClick={savePass}
-          style={{ padding: "11px 20px", borderRadius: 12, background: T.accent, color: "#fff", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer" }}>
-          Alterar Senha
-        </button>
-        {passMsg && <p style={{ fontSize: 12, color: passMsg.includes("sucesso") ? T.accent : T.danger, margin: "8px 0 0" }}>{passMsg}</p>}
-      </div>
-
-      <div>
-        <div style={{ background: T.card, borderRadius: 24, padding: 28, boxShadow: cardShadow, marginBottom: 16 }}>
-          <h3 style={{ fontSize: 16, fontWeight: 800, color: T.text, marginBottom: 16 }}>Tipografia</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {fonts.map(f => (
-              <button key={f} onClick={() => applyFont(f)}
-                style={{ padding: "12px", borderRadius: 12, border: `2px solid ${selectedFont === f ? T.accent : T.border}`,
-                  background: selectedFont === f ? "#f0fdf4" : T.bg,
-                  color: selectedFont === f ? T.accent : T.text,
-                  fontFamily: f, fontWeight: selectedFont === f ? 700 : 500, fontSize: 14, cursor: "pointer" }}>
-                {f}
-              </button>
+      <Card style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <p style={{ fontSize: 15, fontWeight: 800, color: T.text, margin: 0 }}>Visual & Estilo</p>
+        <FSelect label="Tipografia Global" value={font} onChange={e => setFont(e.target.value)} options={["Inter", "Roboto", "Montserrat"]} />
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 6 }}>Paleta de Cores (Tema Principal)</label>
+          <div style={{ display: "flex", gap: 10 }}>
+            {["#7BCB68", "#60a5fa", "#f59e0b", "#ef4444", "#a855f7"].map(c => (
+              <button key={c} onClick={() => setAccent(c)} style={{ width: 32, height: 32, borderRadius: "50%", background: c, border: accent === c ? "3px solid #1D1D1D" : "2px solid transparent", cursor: "pointer" }} />
             ))}
           </div>
         </div>
-
-        <div style={{ background: T.card, borderRadius: 24, padding: 28, boxShadow: cardShadow }}>
-          <h3 style={{ fontSize: 16, fontWeight: 800, color: T.text, marginBottom: 16 }}>Backup & Dados</h3>
-          <button onClick={backupJSON}
-            style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", borderRadius: 14, background: T.bg, border: `1.5px solid ${T.border}`, cursor: "pointer", marginBottom: 10, color: T.text, fontWeight: 600, fontSize: 13 }}>
-            <Download size={18} color={T.accent} /> Exportar Backup (JSON)
-          </button>
-          <button onClick={fakeGDrive}
-            style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", borderRadius: 14, background: T.bg, border: `1.5px solid ${T.border}`, cursor: "pointer", color: T.text, fontWeight: 600, fontSize: 13 }}>
-            <Upload size={18} color="#4285F4" /> Sincronizar Google Drive
-          </button>
-          <p style={{ fontSize: 11, color: T.muted, marginTop: 10 }}>Todos os dados são armazenados localmente no seu navegador.</p>
+        <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 14 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Exportar Backup de Dados</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn variant="outline" small accent={T.accent} onClick={() => downloadData("json")}><Download size={12} /> Salvar em JSON</Btn>
+            <Btn variant="outline" small accent={T.accent} onClick={() => downloadData("excel")}><Download size={12} /> Planilha Excel/CSV</Btn>
+          </div>
         </div>
-      </div>
+      </Card>
+
+      <Card style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <p style={{ fontSize: 15, fontWeight: 800, color: T.text, margin: 0 }}>Gerenciar Perfis Multi-Usuário</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {profiles.map(p => (
+            <div key={p.id} onClick={() => switchProfile(p.id)} style={{ display: "flex", items: "center", gap: 10, padding: 10, borderRadius: 12, background: profile?.id === p.id ? T.bg : "transparent", border: `1.5px solid ${profile?.id === p.id ? T.accent : "transparent"}`, cursor: "pointer" }}>
+              <div style={{ width: 32, height: 32, borderRadius: "50%", background: T.accent, display: "flex", items: "center", justify: "center", color: "#fff", fontWeight: 700, fontSize: 12 }}>{p.name[0].toUpperCase()}</div>
+              <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{p.name} {profile?.id === p.id && "• Ativo"}</span>
+              {profiles.length > 1 && p.id !== profile?.id && (
+                <button onClick={(e) => { e.stopPropagation(); setProfiles(profiles.filter(prof => prof.id !== p.id)); }} style={{ background: "none", border: "none", color: T.danger, cursor: "pointer" }}><Trash2 size={13} /></button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, pt: 4 }}>
+          <input value={newProfileName} onChange={e => setNewProfileName(e.target.value)} placeholder="Nome do perfil" style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 12, background: T.bg, color: T.text, outline: "none" }} />
+          <Btn small accent={T.accent} onClick={handleCreateProfile}>Criar</Btn>
+        </div>
+      </Card>
     </div>
   );
 }
 
-// ─── Main App ──────────────────────────────────────────────────────────────────
-export default function App() {
-  const [logged, setLogged] = useState(() => LS.get("fin_logged", false));
-  const [username, setUsername] = useState(() => LS.get("fin_username", "Usuario"));
+// ─── Core App Component ───────────────────────────────────────────────────────
+export default App;
+function App() {
+  const [profiles, setProfiles] = useState(() => LS.get("fin_global_profiles", [{ id: 1, name: "Admin", password: "1234", avatar: null }]));
+  const [currentProfile, setCurrentProfile] = useState(() => LS.get("fin_global_active_profile", null));
+
+  const pid = currentProfile?.id || 0;
+  const [accent, setAccent] = useState(() => LS.get(pkey(pid, "accent"), "#7BCB68"));
+  const [font, setFont] = useState(() => LS.get(pkey(pid, "font"), "Inter"));
   const [active, setActive] = useState("dashboard");
-  const [font, setFont] = useState(() => LS.get("fin_font", "Inter"));
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const [transactions, setTransactions] = useState(() => LS.get("fin_transactions", SEED_TRANSACTIONS));
-  const [cards, setCards] = useState(() => LS.get("fin_cards", SEED_CARDS));
-  const [fixed, setFixed] = useState(() => LS.get("fin_fixed", SEED_FIXED));
-  const [goals, setGoals] = useState(() => LS.get("fin_goals", SEED_GOALS));
+  const [transactions, setTransactions] = useState([]);
+  const [cards, setCards] = useState([]);
+  const [fixed, setFixed] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [assets, setAssets] = useState([]);
+  const [goals, setGoals] = useState([]);
 
-  const logout = () => {
-    LS.set("fin_logged", false);
-    setLogged(false);
-  };
+  useEffect(() => { LS.set("fin_global_profiles", profiles); }, [profiles]);
+  useEffect(() => { LS.set("fin_global_active_profile", currentProfile); }, [currentProfile]);
 
-  if (!logged) return <LoginScreen onLogin={(u) => { setUsername(u); setLogged(true); }} />;
+  useEffect(() => {
+    if (!currentProfile) return;
+    const id = currentProfile.id;
+    setTransactions(LS.get(pkey(id, "tx"), SEED_TX));
+    setCards(LS.get(pkey(id, "cards"), SEED_CARDS));
+    setFixed(LS.get(pkey(id, "fixed"), SEED_FIXED));
+    setInvoices(LS.get(pkey(id, "invoices"), SEED_INVOICES));
+    setAssets(LS.get(pkey(id, "assets"), SEED_ASSETS));
+    setGoals(LS.get(pkey(id, "goals"), SEED_GOALS));
+    setAccent(LS.get(pkey(id, "accent"), "#7BCB68"));
+    setFont(LS.get(pkey(id, "font"), "Inter"));
+  }, [currentProfile]);
 
-  const tabContent = {
-    dashboard: <DashboardTab transactions={transactions} cards={cards} />,
-    transactions: <TransactionsTab transactions={transactions} setTransactions={setTransactions} />,
-    cards: <CardsTab cards={cards} setCards={setCards} />,
-    fixed: <FixedTab fixed={fixed} setFixed={setFixed} />,
-    investments: <InvestmentsTab goals={goals} setGoals={setGoals} />,
-    ai: <AITab transactions={transactions} goals={goals} />,
-    settings: <SettingsTab username={username} setUsername={setUsername} setFont={setFont} />,
-  };
+  useEffect(() => { if(pid) LS.set(pkey(pid, "tx"), transactions); }, [transactions, pid]);
+  useEffect(() => { if(pid) LS.set(pkey(pid, "cards"), cards); }, [cards, pid]);
+  useEffect(() => { if(pid) LS.set(pkey(pid, "fixed"), fixed); }, [fixed, pid]);
+  useEffect(() => { if(pid) LS.set(pkey(pid, "invoices"), invoices); }, [invoices, pid]);
+  useEffect(() => { if(pid) LS.set(pkey(pid, "assets"), assets); }, [assets, pid]);
+  useEffect(() => { if(pid) LS.set(pkey(pid, "goals"), goals); }, [goals, pid]);
+  useEffect(() => { if(pid) LS.set(pkey(pid, "accent"), accent); }, [accent, pid]);
+  useEffect(() => { if(pid) LS.set(pkey(pid, "font"), font); }, [font, pid]);
 
-  const tabTitles = {
-    dashboard: "Dashboard",
-    transactions: "Transações",
-    cards: "Cartões",
-    fixed: "Despesas Fixas & Dívidas",
-    investments: "Investimentos & Metas",
-    ai: "Assistente Financeiro IA",
-    settings: "Configurações",
-  };
+  const handleLogin = (prof) => setCurrentProfile(prof);
+  const handleLogout = () => setCurrentProfile(null);
+  const handleCreateProfile = (p) => setProfiles([...profiles, p]);
+
+  const allData = { transactions, cards, fixed, invoices, assets, goals };
+  const T = makeTheme(accent);
+
+  if (!currentProfile) {
+    return <LoginScreen profiles={profiles} onLogin={handleLogin} onCreateProfile={handleCreateProfile} accent={accent} />;
+  }
+
+  const tabTitles = { dashboard: "Dashboard Overview", transactions: "Transações", cards: "Gerenciar Cartões", fixed: "Despesas Fixas", invoices: "Faturas Próximas", investments: "Investimentos & Metas", ai: "Assistente de IA", settings: "Configurações do Sistema" };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: T.bg, fontFamily: `'${font}', sans-serif`, color: T.text }}>
-      <link href={`https://fonts.googleapis.com/css2?family=${font.replace(" ", "+")}:wght@400;500;600;700;800&display=swap`} rel="stylesheet" />
-
-      <Sidebar active={active} setActive={setActive} username={username} onLogout={logout} />
-
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {/* Header */}
-        <div style={{ background: T.card, padding: "16px 32px", display: "flex", alignItems: "center", gap: 16, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0, zIndex: 10 }}>
-          <div style={{ flex: 1, position: "relative" }}>
-            <Search size={15} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: T.muted }} />
-            <input placeholder="Buscar algo..."
-              style={{ padding: "10px 16px 10px 40px", borderRadius: 14, border: `1.5px solid ${T.border}`, fontSize: 13, background: T.bg, color: T.text, outline: "none", width: 280 }} />
-          </div>
-          <button style={{ background: "none", border: "none", cursor: "pointer", color: T.muted, position: "relative" }}>
-            <Bell size={20} />
-            <div style={{ position: "absolute", top: 0, right: 0, width: 8, height: 8, borderRadius: "50%", background: T.accent, border: "2px solid #fff" }} />
-          </button>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: "50%", background: T.accent, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "#fff", fontSize: 15 }}>
-              {username[0].toUpperCase()}
-            </div>
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 700, color: T.text, margin: 0 }}>{username}</p>
-              <p style={{ fontSize: 11, color: T.muted, margin: 0 }}>Área de trabalho</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Main content */}
+    <div style={{ display: "flex", background: T.bg, minHeight: "100vh", fontFamily: `${font}, sans-serif`, color: T.text }}>
+      <Sidebar active={active} setActive={setActive} profile={currentProfile} onLogout={handleLogout} accent={accent} allProfiles={profiles} onSwitchProfile={setCurrentProfile} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+        <Header profile={currentProfile} onLogout={handleLogout} invoices={invoices} fixedExpenses={fixed} accent={accent} searchQuery={searchQuery} setSearchQuery={setSearchQuery} allProfiles={profiles} onSwitchProfile={setCurrentProfile} />
         <div style={{ flex: 1, overflowY: "auto", padding: 28 }}>
           <div style={{ marginBottom: 24 }}>
             <h2 style={{ fontSize: 22, fontWeight: 800, color: T.text, margin: 0 }}>{tabTitles[active]}</h2>
           </div>
-
           <AnimatePresence mode="wait">
-            <motion.div
-              key={active}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.22, ease: "easeOut" }}
-            >
-              {tabContent[active]}
+            <motion.div key={active} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              {active === "dashboard" && <DashboardTab transactions={transactions} cards={cards} accent={accent} searchQuery={searchQuery} />}
+              {active === "transactions" && <TransactionsTab transactions={transactions} setTransactions={setTransactions} cards={cards} accent={accent} />}
+              {active === "cards" && <CardsTab cards={cards} setCards={setCards} accent={accent} />}
+              {active === "fixed" && <FixedTab fixed={fixed} setFixed={setFixed} accent={accent} />}
+              {active === "invoices" && <InvoicesTab invoices={invoices} setInvoices={setInvoices} accent={accent} searchQuery={searchQuery} />}
+              {active === "investments" && <InvestmentsTab goals={goals} setGoals={setGoals} assets={assets} setAssets={setAssets} accent={accent} searchQuery={searchQuery} />}
+              {active === "ai" && <AITab transactions={transactions} goals={goals} invoices={invoices} accent={accent} />}
+              {active === "settings" && <SettingsTab profile={currentProfile} profiles={profiles} setProfiles={setProfiles} setCurrentProfile={setCurrentProfile} onLogout={handleLogout} accent={accent} setAccent={setAccent} font={font} setFont={setFont} allData={allData} />}
             </motion.div>
           </AnimatePresence>
         </div>
